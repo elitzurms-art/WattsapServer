@@ -1,0 +1,20 @@
+כתובת מייל בוט
+boot-168@navigate-1b70d.iam.gserviceaccount.com
+
+כתובת גליון שיטס
+1rd-Nzb0zXwCikQ8cAwsNSM6NnXag6Q3kQzQ35MsO6Sc
+
+Unique ID
+108066567765819482878
+
+סגירת מופעי כרומיום
+taskkill /F /IM chrome.exe /T
+
+הרצת פץ' לביטול שגיאה
+npx patch-package
+
+הפעלת טסטים
+npx jest tests/flow.simulation.test.js
+
+התקנת תלויות
+pnpm install
