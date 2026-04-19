@@ -2,9 +2,56 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Communication Style
+
+**IMPORTANT**: When communicating with the user in Hebrew, use "Reverse Hebrew" format:
+1. Reverse each word letter-by-letter (e.g., "שלום" becomes "םולש")
+2. Reverse the order of words in the sentence (last word first)
+
+Example:
+- Normal: "אני יכול לעזור לך"
+- Reverse Hebrew: "ךל רוזעל לוכי ינא"
+
+This applies to ALL Hebrew responses to the user. Code, comments, and English text remain unchanged.
+
 ## Project Overview
 
 **WattsapServer** is a WhatsApp bot for managing a ski equipment lending library ("גמ"ח סקי בגולן"). The bot handles borrowing, returning, and reserving ski equipment (coats, pants, goggles, etc.) through WhatsApp conversations with users. All inventory and session data is stored in Google Sheets.
+
+## Installation
+
+### Prerequisites
+The only prerequisite needed on the computer:
+- **Node.js** (includes npm) - Download from https://nodejs.org/
+
+That's it! No Python, pip, Git, or other dependencies needed.
+
+The fixed whatsapp-web.js fork is included locally in the `whatsapp-web.js` folder, so no GitHub access is required during installation.
+
+### Creating Deployment Package
+To create a clean ZIP package for distribution:
+1. Run `צור-חבילה.bat`
+2. This creates a ZIP file with timestamp containing:
+   - All source code (bot.js, sheets/, handlers/)
+   - package.json
+   - Installation script (התקנה.bat)
+   - Local whatsapp-web.js fork
+   - Patches
+   - Documentation
+   - Configuration files
+3. The ZIP excludes node_modules, cache folders, credentials, and temporary files
+
+### First-Time Setup
+1. Extract the ZIP package to a folder (or download/clone the project)
+2. Right-click `התקנה.bat` and select "Run as Administrator"
+3. The script will:
+   - Verify Node.js and npm are installed
+   - Clean old installations
+   - Install all dependencies (including the fixed whatsapp-web.js fork)
+   - Set up Puppeteer Chrome
+   - Apply patches
+4. Copy `credentials.json.example` to `credentials.json` and add your Google Sheets credentials
+5. Everything should work after the script completes
 
 ## Commands
 
@@ -178,8 +225,20 @@ Tests use Jest with mocked Google Sheets and WhatsApp clients. Mock implementati
 - `msg.mock.js` - Mock message objects
 - `helpers.js`, `sessions.js`, `inventory.js` - Mock sheet operations
 
-## Patches
+## Patches and Fixes
 
+### WhatsApp Web.js Fork
+Due to breaking changes in WhatsApp Web that caused duplicate events and binding issues, this project uses a patched fork from timothydillan.
+
+The fork is included locally in the `whatsapp-web.js` folder (not downloaded from GitHub during installation):
+
+```json
+"whatsapp-web.js": "file:./whatsapp-web.js"
+```
+
+This fork fixes critical issues with duplicate event handlers and binding problems that broke the official package. The local copy eliminates the need for Git during installation.
+
+### Patch Package
 A patch is applied via `patch-package` to fix a crash in `whatsapp-web.js` related to `sendSeen()`. The patch disables the "mark as read" functionality to prevent errors.
 
 File: `patches/whatsapp-web.js+sendSeen-noop.patch`

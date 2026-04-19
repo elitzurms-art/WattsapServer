@@ -1,0 +1,894 @@
+﻿//index.js
+const inventory = require('../sheets/inventory');
+const sessions = require('../sheets/sessions');
+const { normalizePhone, validateSelection } = require('../sheets/helpers');
+const { sendWhatsAppButtons, sendWhatsAppText } = require('../sheets/whatsapp');
+
+async function handleMessage(client, msg, session) {
+	try {
+		console.log('📩 ENTER handleMessage');
+		const contact = await msg.getContact();
+		const phoneNumber = contact.number;
+		const phone = normalizePhone(phoneNumber);
+		// שליפת השם של המשתמש מוואטסאפ
+		const userName = msg.pushname || msg._data?.notifyName || 'לא ידוע';
+		
+		const currentState = (session && session.state) ? session.state : 'ANUNIMI';
+		const text = msg.body?.trim();
+
+		// הדפסה מעודכנת הכוללת את שם המשתמש
+		console.log(`switch- Name: ${userName} | Phone: ${phone} | State: ${currentState} | Text: ${text}`);
+
+		switch (currentState) {
+			
+			case 'ANUNIMI':
+				// כאן אנחנו מעבירים את השם גם ל-startSession כדי שישמר בסשן
+				await startSession(client, msg, userName);
+				break;
+					
+			case 'BORROW_SELECT':
+			case 'RETURN_SELECT':
+			case 'RESERVE_SELECT':
+				await choice(client, msg, session);
+				break;
+
+			case 'BORROW_RETURN_SELECT':
+				await handle_Borrow_Return_Select(client, msg, session);
+				break;
+
+			case 'RESERVE_DATE':
+				await reserveDates(client, msg, session);
+				break;
+
+			case 'RESERVE_DATES_CONFIRM':
+				await handleReserveDatesConfirm(client, msg, session);
+				break;
+
+			case 'BORROW_CONFIRM':
+			case 'RETURN_CONFIRM':
+			case 'RESERVE_CONFIRM':
+				await accept(client, msg, session);
+				break;
+
+			default:
+				await sessions.clearSession(phone);
+				break;
+		}
+		
+	} catch (err) {
+		if (err.message && err.message.includes('Execution context was destroyed')) {
+			console.log('⚠️ דף הוואטסאפ התרענן, מתעלם וממשיך...');
+		} else {
+			console.error('❌ שגיאה ב-handleMessage:', err.message);
+		}
+	}
+}
+
+
+async function startSession(client, msg, session) {
+	const contact = await msg.getContact();
+	const phoneNumber = contact.number;
+	const phone = normalizePhone(phoneNumber);
+	const from = msg.from;
+
+	await sessions.saveSession(phone, 'BORROW_RETURN_SELECT', '');
+
+	await sendWhatsAppButtons(client, from, 'ברוך הבא לגמ"ח סקי בגולן 📦\nמה תרצה לבצע?', [
+		{ id: 'BORROW', title: 'שאילה' },
+		{ id: 'RETURN', title: 'החזרה / ביטול שיריון' },
+		{ id: 'RESERVE', title: 'שיריון 📅' },
+		{ id: 'FINISH', title: 'ביטול' }
+	]);
+}
+
+async function handle_Borrow_Return_Select(client, msg, session) {
+	const contact = await msg.getContact();
+	const phoneNumber = contact.number;
+	const phone = normalizePhone(phoneNumber);
+	const text = msg.body?.trim();
+	const from = msg.from;
+
+	switch (text) {
+		case '1':
+		case 'שאילה':
+			await handleBorrowSelect(client, msg);
+			break;
+
+		case '2':
+		case 'החזרה':
+		case 'ביטול שריון':
+		case 'החזרה / ביטול שיריון':
+			await handleReturnSelect(client, msg);
+			break;
+
+		case '3':
+		case 'שיריון':
+			await handleReserveSelect(client, msg);
+			break;
+
+		case '4':
+		case 'ביטול':
+			await sessions.clearSession(phone);
+			await client.sendMessage(
+				from,
+				'התהליך בוטל\n😊 תודה שהשתמשת בגמ"ח סקי!\n\nעל מנת להשאיל או להחזיר רשום מחדש "גמ"ח סקי"'
+			);
+			break;
+
+		default:
+			await client.sendMessage(from, '❌בחירה לא תקינה\nאנא שלח את המספר 1 לשאילה, 2 להחזרה/ ביטול שיריון, 3 לשריון או 4 לביטול.');
+	}
+}
+
+/* ===================== שאילה ===================== */
+async function handleBorrowSelect(client, msg, session) {
+	const contact = await msg.getContact();
+	const phoneNumber = contact.number;
+	const phone = normalizePhone(phoneNumber);
+	const from = msg.from;
+	const items = await inventory.getAvailableItems();
+
+	if (
+		!items ||
+		(!items.coats?.length &&
+			!items.pants?.length &&
+			!items.additional?.length)
+	) {
+		await client.sendMessage(from, 'אין כרגע פריטים זמינים.');
+		await sessions.clearSession(phone);
+		await client.sendMessage(
+			from,
+			'התהליך בוטל\n😊 תודה שהשתמשת בגמ"ח סקי!\n\nעל מנת להשאיל או להחזיר רשום מחדש "גמ"ח סקי"'
+		);
+		return;
+	}
+
+	await sessions.saveSession(phone, 'BORROW_SELECT', '');
+
+	let messageList = 'בחר את הפריטים שברצונך לשאול:\n';
+	messageList +=
+		'✍️ שלח את מספר הפריט/ים *מופרדים בפסיק או רווח* (לדוגמה: 305,310).\n לביטול הפעולה: שלח "ביטול".\n\n';
+
+	// 🔹 פונקציית עזר מעודכנת המזהה שריון אישי (תמיכה בריבוי ערכים)
+	const formatItem = item => {
+		// 1. פירוק רשימת הטלפונים ומציאת המיקום של המשתמש הנוכחי
+		const allPhones = String(item.phoneWattsap || '').split(',').map(p => normalizePhone(p.trim()));
+		const myIndex = allPhones.indexOf(phone);
+		const isMyReservation = myIndex !== -1;
+
+		// טיפול בסטטוס מושאל+משוריין
+		// סדר חדש: משריינים קודם (עם תאריכים), שואל אחרון (בלי תאריך)
+		if (item.status === 'מושאל+משוריין') {
+			if (isMyReservation) {
+				// בודקים אם יש לי תאריך (= אני משריין) או לא (= אני השואל)
+				const allFromDates = String(item.reserveFrom || '').split(',');
+				const allToDates = String(item.reserveTo || '').split(',');
+
+				// אם יש תאריך באינדקס שלי = אני משריין
+				const myFrom = allFromDates[myIndex]?.trim();
+				const myTo = allToDates[myIndex]?.trim();
+
+				if (myFrom && myTo) {
+					// אני משריין - הפריט מושאל כרגע, לא להציג ברשימת השאילה
+					return null;
+				} else {
+					// אני השואל - הפריט כבר מושאל עלי, לא להציג ברשימת השאילה
+					return null;
+				}
+			}
+			// לא שייך לי
+			return `• *${item.id}* - ${item.name} ⚠️ (מושאל כרגע + משוריין – יש להחזיר עד ${item.reserveReturnBy})`;
+		}
+
+		if (item.status === 'משוריין' && isMyReservation) {
+			// 2. חילוץ התאריכים התואמים למשתמש הספציפי לפי אותו אינדקס
+			const allFromDates = String(item.reserveFrom || '').split(',');
+			const allToDates = String(item.reserveTo || '').split(',');
+
+			const myFrom = allFromDates[myIndex]?.trim() || item.reserveFrom;
+			const myTo = allToDates[myIndex]?.trim() || item.reserveTo;
+
+			return `• *${item.id}* - ${item.name} ⚠️ פריט זה (${item.id}) משוריין על שמך בין התאריכים ${myFrom}-${myTo}, בחירה של הפריט משמעותה העברת הפריט לרשימת הפריטים השאולים ומחיקת השיריון.`;
+		}
+
+		if (item.status === 'משוריין') {
+			return `• *${item.id}* - ${item.name} ⚠️ הפריט משוריין ולכן *חובה עליך להחזירו עד - ${item.reserveReturnBy}*`;
+		}
+
+		return `• *${item.id}* - ${item.name}`;
+	};
+
+	if (items.coats.length)
+		messageList +=
+			'*מעילים זמינים 🧥:*\n' +
+			items.coats.map(formatItem).filter(Boolean).join('\n') +
+			'\n\n';
+
+	if (items.pants.length)
+		messageList +=
+			'*מכנסיים זמינים 👖:*\n' +
+			items.pants.map(formatItem).filter(Boolean).join('\n') +
+			'\n\n';
+
+	if (items.additional.length)
+		messageList +=
+			'*פריטים נוספים 🎒:*\n' +
+			items.additional.map(formatItem).filter(Boolean).join('\n') +
+			'\n\n';
+
+	await client.sendMessage(from, messageList);
+}
+
+
+/* ===================== החזרה ===================== */
+async function handleReturnSelect(client, msg, session) {
+	const contact = await msg.getContact();
+	const phoneNumber = contact.number;
+	const phone = normalizePhone(phoneNumber);
+	const from = msg.from;
+	const items = await inventory.getBorrowedItemsByPhone(phone);
+
+	const totalitems =
+		(items.coats?.length || 0) +
+		(items.pants?.length || 0) +
+		(items.additional?.length || 0);
+
+	if (totalitems === 0) {
+		await client.sendMessage(from, 'לא נמצאו פריטים שאולים או משוריינים על שמך.');
+		await startSession(client, msg, session);
+		return;
+	}
+
+	await client.sendMessage(
+		from,
+		`הטלפון זוהה, מצאתי ${totalitems} פריטים שרשומים על שמך. התהליך ממשיך...`
+	);
+	await sessions.saveSession(phone, 'RETURN_SELECT', '');
+
+	let messageList = 'הנה הציוד המושאל על שמך. בחר מה ברצונך להחזיר/ לבטל:\n\n';
+
+	// 🔹 פונקציית עזר מעודכנת לעיצוב הפריט - תמיכה בריבוי ערכים
+	const formatItem = item => {
+		// 1. פירוק רשימת הטלפונים מהגיליון ומציאת המיקום (אינדקס) של המשתמש הנוכחי
+		const allPhones = String(item.phoneWattsap || '').split(',').map(p => normalizePhone(p.trim()));
+		const myIndex = allPhones.indexOf(phone);
+		const isMyReservation = myIndex !== -1;
+
+		// טיפול בסטטוס מושאל+משוריין
+		// סדר חדש: משריינים קודם (עם תאריכים), שואל אחרון (בלי תאריך)
+		if (item.status === 'מושאל+משוריין') {
+			if (isMyReservation) {
+				// בודקים אם יש לי תאריך (= אני משריין) או לא (= אני השואל)
+				const allFromDates = String(item.reserveFrom || '').split(',');
+				const allToDates = String(item.reserveTo || '').split(',');
+
+				const myFrom = allFromDates[myIndex]?.trim();
+				const myTo = allToDates[myIndex]?.trim();
+
+				if (myFrom && myTo) {
+					// אני משריין - יש לי תאריכים
+					return `• *${item.id}* - ${item.name} ⚠️ פריט זה משוריין על שמך לתאריכים ${myFrom}-${myTo} אך מושאל כרגע למישהו אחר. ביטול השריון יסיר אותך מהרשימה.`;
+				} else {
+					// אני השואל - אין לי תאריכים
+					return `• *${item.id}* - ${item.name} ⚠️ *הפריט משוריין ולכן חובה עליך להחזירו עד - ${item.reserveReturnBy}*`;
+				}
+			}
+		}
+
+		if (item.status === 'משוריין' && isMyReservation) {
+			// 2. חילוץ התאריכים התואמים למשתמש הספציפי לפי אותו אינדקס
+			const allFromDates = String(item.reserveFrom || '').split(',');
+			const allToDates = String(item.reserveTo || '').split(',');
+
+			const myFrom = allFromDates[myIndex]?.trim() || item.reserveFrom;
+			const myTo = allToDates[myIndex]?.trim() || item.reserveTo;
+
+			return `• *${item.id}* - ${item.name} ⚠️ פריט זה (${item.id}) משוריין על שמך בין התאריכים ${myFrom}-${myTo}, בחירה של הפריט משמעותה ביטול השיריון של הפריט.`;
+		}
+		// פריט שאול על ידי המשתמש אבל משוריין על מישהו אחר
+		if (item.status === 'משוריין') {
+			return `• *${item.id}* - ${item.name} ⚠️ *הפריט משוריין ולכן חובה עליך להחזירו עד - ${item.reserveReturnBy}*`;
+		}
+
+		return `• *${item.id}* - ${item.name}`;
+	};
+
+	if (items.coats.length)
+		messageList +=
+			'*מעילים 🧥:*\n' +
+			items.coats.map(formatItem).join('\n') +
+			'\n\n';
+			
+	if (items.pants.length)
+		messageList +=
+			'*מכנסיים 👖:*\n' +
+			items.pants.map(formatItem).join('\n') +
+			'\n\n';
+			
+	if (items.additional.length)
+		messageList +=
+			'*פריטים נוספים 🎒:*\n' +
+			items.additional.map(formatItem).filter(Boolean).join('\n') +
+			'\n\n';
+			
+	messageList += '*נא לשלוח את מספרי המזהה של הפריטים שחזרו (מופרדים בפסיק או רווח)*';
+	await client.sendMessage(from, messageList);
+}
+
+
+/* ===================== שיריון ===================== */
+async function handleReserveSelect(client, msg, session) {
+	const contact = await msg.getContact();
+	const phoneNumber = contact.number;
+	const phone = normalizePhone(phoneNumber);
+	const from = msg.from;
+	const items = await inventory.getAvailableItems();
+
+	if (
+		!items ||
+		(!items.coats?.length &&
+			!items.pants?.length &&
+			!items.additional?.length)
+	) {
+		await client.sendMessage(from, 'אין כרגע פריטים זמינים.');
+		await sessions.clearSession(phone);
+		return;
+	}
+
+	await sessions.saveSession(phone, 'RESERVE_SELECT', '');
+
+	let messageList = 'בחר את הפריטים שברצונך לשריין:\n';
+	messageList +=
+		'✍️ שלח את מספר הפריט/ים *מופרדים בפסיק או רווח* (לדוגמה: 305,310).\n לביטול הפעולה: שלח "ביטול".\n\n';
+
+	const formatItem = item => {
+		// 🔥 עדכון: בדיקת בעלות על שריון מתוך רשימת טלפונים (split)
+		const allPhones = String(item.phoneWattsap || '').split(',').map(p => normalizePhone(p.trim()));
+		const isMyReservation = allPhones.includes(phone);
+
+		// 1. אם הפריט כבר משוריין על שמי (מופיע ברשימה) - אנחנו לא מציגים אותו ברשימת השריון
+		if (isMyReservation) {
+			return null;
+		}
+
+		// 2. טיפול בסטטוס מושאל+משוריין
+		if (item.status === 'מושאל+משוריין') {
+			return `• *${item.id}* - ${item.name} ⚠️ מושאל כרגע + משוריין – לא ניתן לשריין כעת (מושאל ויש שריון עתידי)`;
+		}
+
+		// 3. אם הפריט משוריין לאחרים - מציגים אותו עם אזהרת החזרה
+		if (item.status === 'משוריין') {
+			return `• *${item.id}* - ${item.name} ⚠️ משוריין – השריון מותנה בכך שתחזיר עד ${item.reserveReturnBy}, או לחילופין שתשריין החל מ- ${item.reserveTo}`;
+		}
+
+		// 4. פריט פנוי לחלוטין
+		return `• *${item.id}* - ${item.name}`;
+	};
+
+	// פונקציית עזר לסינון פריטים שהחזירו null (אלו שמשוריינים עלי)
+	const renderList = (list) => list.map(formatItem).filter(Boolean).join('\n');
+
+	if (items.coats.length) {
+		const list = renderList(items.coats);
+		if (list) messageList += '*מעילים זמינים 🧥:*\n' + list + '\n\n';
+	}
+
+	if (items.pants.length) {
+		const list = renderList(items.pants);
+		if (list) messageList += '*מכנסיים זמינים 👖:*\n' + list + '\n\n';
+	}
+
+	if (items.additional.length) {
+		const list = renderList(items.additional);
+		if (list) messageList += '*פריטים נוספים 🎒:*\n' + list + '\n\n';
+	}
+
+	await client.sendMessage(from, messageList);
+}
+
+
+// הודעת אישור לכלל הפעולות שאילה / החזרה / שריון
+async function choice(client, msg, session) {
+	const contact = await msg.getContact();
+	const phoneNumber = contact.number;
+	const phone = normalizePhone(phoneNumber);
+	const from = msg.from;
+	const text = msg.body?.trim();
+	const currentState = session.state;
+
+	if (!text) return;
+
+	// ביטול תהליך
+	if (text === 'ביטול') {
+		await sessions.clearSession(phone);
+		await client.sendMessage(from, 'התהליך בוטל\n😊 תודה שהשתמשת בגמ"ח סקי!\n\nעל מנת לשאול, להחזיר או לשריין- רשום מחדש "גמ"ח סקי"');
+		return;
+	}
+
+	// קבלת פריטים לפי מצב
+	let categorizedItems = currentState === 'RETURN_SELECT'
+		? await inventory.getBorrowedItemsByPhone(phone)
+		: await inventory.getAvailableItems();
+
+	// 🔥 סינון פריטים עבור שריון - לא להראות פריטים שכבר משוריינים על המשתמש
+	if (currentState === 'RESERVE_SELECT') {
+		const filterOutMine = (list) =>
+			list.filter(i => {
+				const allPhones = String(i.phoneWattsap || '').split(',').map(p => normalizePhone(p.trim()));
+				return !allPhones.includes(phone);
+			});
+		categorizedItems.coats = filterOutMine(categorizedItems.coats);
+		categorizedItems.pants = filterOutMine(categorizedItems.pants);
+		categorizedItems.additional = filterOutMine(categorizedItems.additional);
+	}
+
+	const allItems = [
+		...categorizedItems.coats,
+		...categorizedItems.pants,
+		...categorizedItems.additional
+	];
+
+	const validation = validateSelection(text, allItems);
+
+	if (!validation.valid || !validation.valid.length) {
+		await client.sendMessage(from, `❌ ${validation.message || 'בחירה לא תקינה'}`);
+		return;
+	}
+
+	const items = validation.valid;
+	const nextState = currentState === 'RESERVE_SELECT' ? 'RESERVE_DATE'
+		: currentState === 'BORROW_SELECT' ? 'BORROW_CONFIRM'
+		: 'RETURN_CONFIRM';
+	const peula = nextState === 'RESERVE_DATE' ? 'לשריין' : nextState === 'BORROW_CONFIRM' ? 'לשאול' : 'להחזיר';
+
+	await sessions.saveSession(
+		phone,
+		nextState,
+		`${items.map(i => i.id).join(',')}##${items.map(i => `${i.id} - ${i.name}`).join(' | ')}`
+	);
+
+	// פונקציה קטנה לבניית רשימת פריטים לפי קטגוריות
+	const buildCategoryList = (list) => {
+		const coats = list.filter(i => i.name.includes('מעיל'));
+		const pants = list.filter(i => i.name.includes('מכנס'));
+		const additional = list.filter(i => !i.name.includes('מעיל') && !i.name.includes('מכנס'));
+
+		let msgText = '';
+		if (coats.length) msgText += '*מעילים:*\n' + coats.map(i => `• ${i.id} - ${i.name}`).join('\n') + '\n';
+		if (pants.length) msgText += '*מכנסיים:*\n' + pants.map(i => `• ${i.id} - ${i.name}`).join('\n') + '\n';
+		if (additional.length) msgText += '*פריטים נוספים:*\n' + additional.map(i => `• ${i.id} - ${i.name}`).join('\n') + '\n';
+		return msgText;
+	};
+
+	let message = `✅ *בחרת ${peula} את הפריטים הבאים:*\n\n`;
+
+	// סינון פריטים לפי סוג שריון
+	const reservedOthers = [];   // פריטים משוריינים על אחרים
+	const regularItems = [];     // פריטים רגילים או פריטים של המשתמש (שאילה/החזרה)
+
+	items.forEach(i => {
+		// תמיכה גם בסטטוס מושאל+משוריין
+		if ((i.status === 'משוריין' || i.status === 'מושאל+משוריין') && i.phoneWattsap) {
+			const allPhones = String(i.phoneWattsap || '').split(',').map(p => normalizePhone(p.trim()));
+			const actualIndex = allPhones.indexOf(phone);
+
+			if (currentState === 'RESERVE_SELECT') {
+				// בהשריון, לא להראות פריטים שמורים על המשתמש או מושאלים כרגע
+				if (actualIndex === -1 || i.status === 'מושאל+משוריין') {
+					reservedOthers.push(i);
+				}
+			} else {
+				// בהחזרה או השאלה - לראות את הפריטים האישיים והאחרים
+				if (actualIndex !== -1) {
+					const allFromDates = String(i.reserveFrom || '').split(',');
+					const allToDates = String(i.reserveTo || '').split(',');
+
+					// בודקים אם יש תאריך באינדקס שלי
+					const myFrom = allFromDates[actualIndex]?.trim() || '';
+					const myTo = allToDates[actualIndex]?.trim() || '';
+
+					regularItems.push({ ...i, myFrom, myTo });
+				} else {
+					reservedOthers.push(i);
+				}
+			}
+		} else {
+			regularItems.push(i);
+		}
+	});
+
+	// הצגת פריטים משוריינים של אחרים
+	if (reservedOthers.length > 0) {
+		message += `⚠️ *פריטים משוריינים - חובה להחזיר בזמן!*\n`;
+		reservedOthers.forEach(i => {
+			message += `• ${i.id} - ${i.name}\n  ⚠️ *הפריט משוריין ולכן חובה עליך להחזירו עד - ${i.reserveReturnBy}*\n`;
+		});
+		message += '\n';
+	}
+
+	// הצגת פריטים רגילים (כולל פריטים משוריינים על המשתמש בהחזרה/שאילה)
+	if (regularItems.length > 0) {
+		message += buildCategoryList(regularItems.map(i => ({ id: i.id, name: i.name })));
+
+		// הצגת פריטים משוריינים של המשתמש בהחזרה
+		if (currentState === 'RETURN_SELECT') {
+			regularItems.forEach(i => {
+				// פריט משוריין על המשתמש
+				if (i.myTo) {
+					message += `\n⚠️ פריט ${i.id}: משוריין על שמך בין התאריכים ${i.myFrom}-${i.myTo}, בחירה של הפריט משמעותה מחיקת השיריון.`;
+				}
+				// פריט מושאל+משוריין והמשתמש הוא השואל (בלי תאריכים)
+				else if (i.status === 'מושאל+משוריין' && !i.myTo) {
+					message += `\n⚠️ *פריט ${i.id}: הפריט משוריין ולכן חובה עליך להחזירו עד - ${i.reserveReturnBy}*`;
+				}
+			});
+			message += '\n';
+		}
+
+		// הצגת פריטים משוריינים של המשתמש בהשאלה
+		if (currentState === 'BORROW_SELECT') {
+			regularItems.forEach(i => {
+				if (i.myTo) message += `⚠️ פריט זה (${i.id}) משוריין על שמך בין התאריכים ${i.myFrom}-${i.myTo}, בחירה של הפריט משמעותה העברת הפריט לרשימת הפריטים השאולים ומחיקת השיריון.`;
+		});
+			message += '\n';
+		}
+	}
+
+	await sendWhatsAppButtons(client, from, message + 'האם לאשר?', [
+		{ id: 'CONFIRM', title: 'אישור' },
+		{ id: 'CANCEL', title: 'ביטול' }
+	]);
+}
+
+
+// בחירת תאריכים לשריון
+async function reserveDates(client, msg, session) {
+	const contact = await msg.getContact();
+	const phoneNumber = contact.number;
+	const phone = normalizePhone(phoneNumber);
+	const from = msg.from;
+	const text = msg.body?.trim();
+	const currentState = session.state;
+	
+	if (!text) return;
+
+	if (text === 'ביטול' || text === '2') {
+		await sessions.clearSession(phone);
+		await client.sendMessage(
+			from,
+			'התהליך בוטל\n😊 תודה שהשתמשת בגמ"ח סקי!\n\nעל מנת לשאול, להחזיר או לשריין- רשום מחדש "גמ"ח סקי"'
+		);
+		return;
+	}
+	
+	if (text === 'אישור' || text === '1') {
+
+
+	await sessions.saveSession(
+		phone,
+		'RESERVE_DATES_CONFIRM',
+		session.payload
+	);
+	
+	await client.sendMessage(
+		from,
+		'נא לשלוח תאריך התחלה ותאריך סיום באותה ההודעה\nלדוגמה: *12.02.26 עד 18.02.26*'
+	);
+	}
+}
+
+// פונקציית עזר להמרת מחרוזת תאריך (DD/MM/YYYY) לאובייקט Date
+function parseDate(dateStr) {
+    if (!dateStr) return null;
+    const parts = dateStr.trim().split('/');
+    if (parts.length !== 3) return null;
+
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    const year = parseInt(parts[2], 10);
+
+    // יצירת אובייקט תאריך
+    const d = new Date(year, month - 1, day);
+
+    // בדיקה שהתאריך חוקי:
+    // ב-JS, אם תיתן יום 33, הוא יקפוץ אוטומטית לחודש הבא. 
+    // לכן בודקים אם היום, החודש והשנה נשארו זהים למה שהכנסנו.
+    if (d.getFullYear() === year && d.getMonth() === month - 1 && d.getDate() === day) {
+        return d;
+    }
+    
+    return null; // תאריך לא תקין (כמו 33/01)
+}
+
+
+
+// בדיקת תאריכים לשריון
+async function handleReserveDatesConfirm(client, msg, session) {
+    const contact = await msg.getContact();
+    const phoneNumber = contact.number;
+    const phone = normalizePhone(phoneNumber);
+    const from = msg.from;
+    const text = (msg.body || '').trim();
+
+    if (!text) return;
+    if (text === 'ביטול' || text === '2') {
+        await sessions.clearSession(phone);
+        await client.sendMessage(from, 'התהליך בוטל\n😊 תודה שהשתמשת בגמ"ח סקי!\n\nעל מנת להשאיל או להחזיר רשום מחדש "גמ"ח סקי"');
+        return;
+    }
+            
+    const dateMatches = text.match(/\d{1,2}[\/\\.]\d{1,2}[\/\\.]\d{2,4}/g);
+
+    if (!dateMatches || dateMatches.length < 2) {
+        await client.sendMessage(from, '❌ לא הצלחתי למצוא שני תאריכים.\nנא לשלוח תאריך התחלה ותאריך סיום.\nלדוגמה: *12/02/2026 עד 18/02/2026*');
+        return;
+    }	
+
+    const formatToStandardDate = (dateStr) => {
+        let normalizedDate = dateStr.replace(/[\.\\\s]/g, '/'); 
+        let parts = normalizedDate.split('/');
+        if (parts[2].length === 2) parts[2] = '20' + parts[2];
+        parts[0] = parts[0].padStart(2, '0');
+        parts[1] = parts[1].padStart(2, '0');
+        return parts.join('/');
+    };
+                
+    const reserveFrom = formatToStandardDate(dateMatches[0]);
+    const reserveTo = formatToStandardDate(dateMatches[1]);
+
+    // --- לוגיקת בדיקות 2026 ---
+    const startDate = parseDate(reserveFrom);
+    const endDate = parseDate(reserveTo);
+	
+	// בדיקה אם אחד התאריכים לא חוקי (למשל 33/01/2026)
+	if (!startDate || !endDate) {
+		await client.sendMessage(from, '❌ אחד התאריכים ששלחת אינו תקין (למשל: יום או חודש לא קיימים).\nנא לשלוח תאריכים חוקיים בפורמט 01.01.26.');
+		return;
+	}
+	
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // א. תאריך סיום אחרי התחלה
+    if (endDate < startDate) {
+        await client.sendMessage(from, '❌ תאריך הסיום לא יכול להיות לפני תאריך ההתחלה.');
+        return;
+    }
+
+    // ב. תאריך התחלה לפחות 3 ימים מהיום (23/01/2026)
+    const minStart = new Date(today);
+    minStart.setDate(today.getDate() + 3);
+    if (startDate < minStart) {
+        await client.sendMessage(from, `❌ שריון חייב להתחיל לפחות 3 ימים מהיום. התאריך המוקדם ביותר: ${minStart.toLocaleDateString('he-IL')}`);
+        return;
+    }
+
+    // ג. תאריך סיום עד 3 חודשים קדימה
+    const maxLimit = new Date(today);
+    maxLimit.setMonth(today.getMonth() + 3);
+    if (endDate > maxLimit) {
+        await client.sendMessage(from, `❌ לא ניתן לשריין מעבר ל-3 חודשים קדימה (עד ${maxLimit.toLocaleDateString('he-IL')})`);
+        return;
+    }
+
+    // ד. משך השריון עד שבועיים
+    const diffTime = Math.abs(endDate - startDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    if (diffDays > 14) {
+        await client.sendMessage(from, '❌ לא ניתן לשריין לתקופה העולה על שבועיים (14 יום).');
+        return;
+    }
+
+    // ה. בדיקת חפיפה מול שריונים קיימים בגיליון ניהול
+    const [idsPart] = session.payload.split('##');
+    const selectedIds = idsPart.split(',').map(id => id.trim());
+    
+    const inventoryData = await inventory.getAvailableItems();
+    const allItems = [...inventoryData.coats, ...inventoryData.pants, ...inventoryData.additional];
+    
+    const unavailableItems = [];
+    for (const id of selectedIds) {
+        const item = allItems.find(i => i.id === id);
+        // שימוש בפונקציית העזר שנמצאת ב-inventory.js
+        if (item && inventory.hasDateOverlap(item, reserveFrom, reserveTo)) {
+            unavailableItems.push(id);
+        }
+    }
+
+    if (unavailableItems.length > 0) {
+        await client.sendMessage(from, `❌ הפריט/ים הבאים כבר משוריינים בתאריכים שביקשת: ${unavailableItems.join(', ')} כפי שפורט בהודעה הקודמת.\nנא לשלוח תאריכים אחרים.`);
+        return;
+    }
+
+    // שמירה בסשן ומעבר לאישור
+    await sessions.saveSession(phone, 'RESERVE_CONFIRM', session.payload, reserveFrom, reserveTo);
+
+    const message = 
+        `📅 *סיכום שיריון:*\n` +
+        `תחילת שיריון: ${reserveFrom}\n` +
+        `סיום שיריון: ${reserveTo}\n\n` +
+        `האם ברצונך לאשר?`;
+
+    await sendWhatsAppButtons(client, from, message, [
+        { id: 'CONFIRM', title: 'אישור' },
+        { id: 'CANCEL', title: 'ביטול' }
+    ]);
+}
+
+
+// ביצוע הפעולות בפועל לאחר קבלת האישור
+async function accept(client, msg, session)
+{
+	const contact = await msg.getContact();
+	const phoneNumber = contact.number;
+	const phone = normalizePhone(phoneNumber);
+    const text = msg.body?.trim();
+	const from = msg.from;
+	const currentState = session.state;
+	
+    if (!text) return;
+
+	if (text ==='ביטול' || text ==='2')
+	{
+		await sessions.clearSession(phone);
+		await client.sendMessage(from, 'התהליך בוטל\n😊 תודה שהשתמשת בגמ"ח סקי!\n\nעל מנת להשאיל או להחזיר רשום מחדש "גמ"ח סקי"');
+		return;
+	}
+	else
+	{
+		if (text ==='אישור' || text ==='1' || text === 'CONFIRM')
+		{ 
+			if (!session.payload || !session.payload.includes('##')) {
+				await client.sendMessage(from, '❌ שגיאה בתהליך. אנא התחל מחדש.');
+				await sessions.clearSession(phone);
+				return;
+			}
+
+			const [itemsStr, namesStr] = session.payload.split('##');
+			const finalIds = itemsStr.split(',').map(x => x.trim());
+			const details = namesStr.split(' | ').map(row => {
+				const [id, ...nameParts] = row.split(' - ');
+				return { id: id.trim(), name: nameParts.join(' - ').trim() };
+			});
+
+			const contact = await msg.getContact();
+
+			const responseData = {
+				action: '',
+				userName: contact.pushname || msg.notifyName || 'לא ידוע',
+				phone: phone,
+				returnDate: '',
+				coats: '',
+				pants: '',
+				additional: '',
+				returnItems: '',
+				reserveItems: '',
+				reserveFrom: '',
+				reserveTo: '',
+				reserveItemsCancel: '',
+				itemsThatWereReserved: '' // שדה עזר חדש לביטול אוטומטי
+			};
+
+			// --- טיפול בשאילת ציוד ---
+			if (currentState === 'BORROW_CONFIRM') {
+				// שליפת המידע המלא על הפריטים כדי לזהות שריונים אישיים
+				const availableItems = await inventory.getAvailableItems();
+				const allAvailable = [
+					...availableItems.coats, 
+					...availableItems.pants, 
+					...availableItems.additional
+				];
+
+				const itemsToCancelAuto = [];
+				
+				// בדיקה עבור כל פריט שנבחר: האם הוא משוריין על השואל?
+				finalIds.forEach(id => {
+					const item = allAvailable.find(i => i.id === id);
+					if (item && item.status === 'משוריין') {
+						// 🔥 שינוי כאן: פירוק רשימת הטלפונים ובדיקה אם הטלפון הנוכחי נמצא בה
+						const phonesList = String(item.phoneWattsap || '').split(',').map(p => normalizePhone(p.trim()));
+						if (phonesList.includes(phone)) {
+							itemsToCancelAuto.push(id);
+						}
+					}
+				});
+
+				const coats = details.filter(i => i.name.includes('מעיל')).map(i => i.id);
+				const pants = details.filter(i => i.name.includes('מכנס')).map(i => i.id);
+				const categories = ['מסיכת סקי','גוגלס','נעליים','כפפות','חרמונית','קסדה'];
+				const additional = details.filter(i => categories.some(cat => i.name.includes(cat))).map(i => i.id);
+
+				responseData.action = 'שאילת ציוד';
+				responseData.coats = formatIds(coats);
+				responseData.pants = formatIds(pants);
+				responseData.additional = formatIds(additional);
+				
+				// כאן אנחנו מעבירים את רשימת הפריטים למחיקה מהשריון
+				responseData.itemsThatWereReserved = itemsToCancelAuto.join(',');
+			}
+						
+			// --- טיפול בהחזרת ציוד (כולל ביטול שריון ידני) ---
+			if (currentState === 'RETURN_CONFIRM') {
+				const borrowedItems = await inventory.getBorrowedItemsByPhone(phone)
+					|| { coats: [], pants: [], additional: [] };
+
+				const allBorrowed = borrowedItems.coats.concat(borrowedItems.pants, borrowedItems.additional);
+
+				// 🔥 תיקון: שליפת פריטים זמינים למקרה שהמשתמש שאל פריט משוריין של אחר
+				const availableItems = await inventory.getAvailableItems();
+				const allAvailable = [
+					...availableItems.coats,
+					...availableItems.pants,
+					...availableItems.additional
+				];
+
+				const finalReturnItems = [];
+				const reserveItemsCancel = [];
+
+				finalIds.forEach(id => {
+					// חיפוש בפריטים שלי
+					let item = allBorrowed.find(i => i.id === id);
+
+					// אם לא נמצא - חיפוש בפריטים זמינים (מקרה של שאילה של פריט משוריין על אחר)
+					if (!item) {
+						item = allAvailable.find(i => i.id === id);
+					}
+
+					if (!item) return;
+
+					if (item.status === 'מושאל' || item.status === 'מושאל+משוריין') {
+						finalReturnItems.push(item);
+					} else if (item.status === 'משוריין') {
+						reserveItemsCancel.push(item);
+					}
+				});
+
+				responseData.action = 'החזרת ציוד';
+				responseData.returnItems = formatIds(finalReturnItems.map(i => i.id));
+				responseData.reserveItemsCancel = formatIds(reserveItemsCancel.map(i => i.id));
+				// ניקוי עמודות תזכורות (M-Q) אם היו תזכורות - לפני כתיבת תגובות
+				const { clearReminderColumns } = require('../sheets/inventory');
+				const returnedIds = finalReturnItems.map(i => i.id);
+
+				for (const itemId of returnedIds) {
+					await clearReminderColumns(phone, itemId);
+				}
+
+				console.log(`✅ עמודות תזכורות נוקו עבור ${returnedIds.length} פריטים שהוחזרו`);
+			}
+
+			// --- טיפול בשריון ציוד ---
+			if (currentState === 'RESERVE_CONFIRM') {
+				const categories = ['מסיכת סקי','גוגלס','נעליים','כפפות','חרמונית','קסדה','מעיל','מכנס'];
+				const additional = details.filter(i => categories.some(cat => i.name.includes(cat))).map(i => i.id);
+
+				responseData.action = 'שריון ציוד';
+				responseData.reserveItems = formatIds(additional);
+				responseData.reserveFrom = session.reserveFrom;
+				responseData.reserveTo = session.reserveTo;
+			}
+			
+			// שליחה לפונקציית הרישום בגיליון
+			await inventory.addResponse(responseData);
+
+
+			await client.sendMessage(from, 'הפעולה בוצעה בהצלחה ✅\nיום טוב 😊\nאם ברצונך לשאול, לשריין או להחזיר פריטים נוספים, רשום: "גמ"ח סקי"');
+			await sessions.clearSession(phone);
+			return;
+		} 
+		else
+		{
+			await client.sendMessage(from, `❌בחירה לא תקינה\nאנא שלח את המספר 1 לאישור או 2 לביטול.`);
+		}
+	}
+}
+
+
+
+function formatIds(ids) {
+	if (!Array.isArray(ids) || !ids.length) return '';
+	return `,${ids.join(',')},`;
+}
+
+
+module.exports = { handleMessage };

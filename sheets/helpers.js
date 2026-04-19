@@ -38,7 +38,23 @@ async function getDoc() {
 // ===============================
 function normalizePhone(phone) {
     if (!phone) return '';
-    return phone.toString().replace(/\D/g, '');
+
+    phone = phone.toString().trim();
+
+    // אם כבר כולל @c.us או @g.us → נשאר כמו שהוא
+    if (phone.includes('@g.us')) return phone;
+
+    // הסרת כל תווים שאינם ספרות
+    let normalized = phone.replace(/\D/g, '');
+
+    // טיפול במספרים ישראליים
+    if (normalized.startsWith('0') && normalized.length === 10) {
+        normalized = '972' + normalized.substring(1);
+    } else if (!normalized.startsWith('972') && normalized.length === 9) {
+        normalized = '972' + normalized;
+    }
+	
+    return normalized;
 }
 
 // ===============================

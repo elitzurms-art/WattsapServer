@@ -1,6 +1,28 @@
+# Dependencies (exclude node_modules but keep whatsapp-web.js folder!)
 node_modules/
+
+# Important: Do NOT ignore whatsapp-web.js folder - it's a local dependency!
+# whatsapp-web.js/
+
+# Logs
 *.log
+
+# Cache and temp folders
 .claude/
 .wwebjs_auth/
 .wwebjs_cache/
+.cache/
+latest_chrome/
+
+# Credentials
 credentials.json
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+
+# Deployment packages
+WattsapServer-*.zip
+temp_package/

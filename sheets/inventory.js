@@ -27,15 +27,11 @@ async function getAvailableItems() {
             const id = (rawId !== undefined && rawId !== null && rawId !== '') ? String(rawId) : `item_${index}`;
 
             // שליפת השדות מהגיליון (כולל הרשימות המאוחדות)
-            const nameWattsap = row.get('שם') || ""; // עודכן לשם העמודה בגיליון
+            const nameWattsap = row.get('שם השואל/ משריין') || "";
             const phoneWattsap = row.get('טלפון') || ""; 
 
             const reserveFrom = row.get('תאריך תחילת שיריון') || '';
             const reserveTo = row.get('תאריך סיום שיריון') || '';
-			
-			// פיצול רשימת התאריכים ושליחת התאריך הראשון בלבד לחישוב
-			const firstReserveDate = reserveFrom.split(',')[0].trim();
-			const reserveReturnBy = ((status === 'משוריין' || status === 'מושאל+משוריין') && firstReserveDate) ? getDayBefore(firstReserveDate) : null;
 
             const item = {
                 id: id,
@@ -43,10 +39,9 @@ async function getAvailableItems() {
                 status: status,
                 reserveFrom: reserveFrom,
                 reserveTo: reserveTo,
-                reserveReturnBy: reserveReturnBy,
                 nameWattsap: String(nameWattsap),
                 // ניקוי רווחים מהטלפונים כדי למנוע בעיות בהשוואה בהמשך
-                phoneWattsap: String(phoneWattsap).replace(/\s/g, '') 
+                phoneWattsap: String(phoneWattsap).replace(/\s/g, '')
             };
 
             if (type.includes('מעיל')) coats.push(item);
@@ -92,9 +87,12 @@ async function getBorrowedItemsByPhone(phone) {
             // 🔥 עדכון קריטי: טיפול ברשימת טלפונים (עקב שריון כפול)
             const rawPhones = String(row.get('טלפון') || '');
             const allPhones = rawPhones.split(',').map(p => normalizePhone(p.trim()));
-			
+
             // בדיקה האם הטלפון של המשתמש נמצא בתוך רשימת הטלפונים של השורה
             if (!allPhones.includes(userPhone)) return;
+
+            // מציאת האינדקס של המשתמש
+            const userIndex = allPhones.findIndex(p => p === userPhone);
 
             const type = (row.get('סוג') || '').trim();
             const rawId = row.get('מס"ד');
@@ -103,10 +101,17 @@ async function getBorrowedItemsByPhone(phone) {
             const nameWattsap = row.get('שם השואל/ משריין') || "";
             const reserveFrom = row.get('תאריך תחילת שיריון') || '';
             const reserveTo = row.get('תאריך סיום שיריון') || '';
-			
-			// פיצול רשימת התאריכים ושליחת התאריך הראשון בלבד לחישוב
-			const firstReserveDate = reserveFrom.split(',')[0].trim();
-			const reserveReturnBy = ((status === 'משוריין' || status === 'מושאל+משוריין') && firstReserveDate) ? getDayBefore(firstReserveDate) : null;
+
+            // חישוב תאריך החזרה לפי אינדקס המשתמש
+            let reserveReturnBy = null;
+            if ((status === 'משוריין' || status === 'מושאל+משוריין') && userIndex !== -1) {
+                const fromArr = reserveFrom.split(',').map(d => d.trim());
+                const userReserveDate = fromArr[userIndex] || '';
+
+                if (userReserveDate && userReserveDate !== 'ללא') {
+                    reserveReturnBy = getDayBefore(userReserveDate);
+                }
+            }
 
             const item = {
                 id: id,
@@ -161,6 +166,38 @@ function getDayBefore(dateInput) {
 }
 
 
+/**
+ * מוצא את התאריך המוקדם ביותר מתוך רשימה מופרדת בפסיקים
+ * @param {string} datesStr - מחרוזת תאריכים מופרדים בפסיק (לדוגמה: "15/02/26, 10/02/26, 20/02/26")
+ * @returns {string|null} - התאריך המוקדם ביותר בפורמט DD/MM/YYYY או null
+ */
+function getEarliestDate(datesStr) {
+    if (!datesStr) return null;
+
+    // פיצול והסרת רווחים
+    const datesList = datesStr.split(',')
+        .map(d => d.trim())
+        .filter(d => d && d !== 'ללא');
+
+    if (datesList.length === 0) return null;
+
+    // המרה לאובייקטי Date ומציאת המינימום
+    let earliestDate = null;
+    let earliestStr = null;
+
+    datesList.forEach(dateStr => {
+        const d = parseDate(dateStr);
+        if (d) {
+            if (!earliestDate || d < earliestDate) {
+                earliestDate = d;
+                earliestStr = dateStr;
+            }
+        }
+    });
+
+    return earliestStr;
+}
+
 // פונקציית עזר להמרת מחרוזת תאריך (DD/MM/YYYY) לאובייקט Date
 function parseDate(dateStr) {
     if (!dateStr) return null;
@@ -212,55 +249,377 @@ function hasDateOverlap(item, reqStartStr, reqEndStr) {
 }
 
 
-// רישום תגובה סופית לגיליון "תגובות"
-async function addResponse(data) {
+// ===============================
+// יומן פעולות - פונקציות חדשות
+// ===============================
+
+/**
+ * כותב שורה חדשה ליומן פעולות
+ */
+async function addToLog(data) {
     try {
         const doc = await getDoc();
-        const sheet = doc.sheetsByTitle['תגובות'];
-        if (!sheet) throw new Error('גיליון תגובות לא נמצא');
+        const sheet = doc.sheetsByTitle['יומן פעולות'];
 
-        const now = new Date();
-        const formattedDate =
-            ("0" + now.getDate()).slice(-2) + "/" +
-            ("0" + (now.getMonth() + 1)).slice(-2) + "/" +
-            now.getFullYear() + " " +
-            ("0" + now.getHours()).slice(-2) + ":" +
-            ("0" + now.getMinutes()).slice(-2) + ":" +
-            ("0" + now.getSeconds()).slice(-2);
-
-        // --- לוגיקת ביטול שריון אוטומטי בעת שאילה ---
-        let finalReserveCancel = data.reserveItemsCancel || '';
-
-        // אם זו פעולת שאילה, נבדוק אם יש פריטים שצריך לבטל להם שריון (אלו ששואלים כרגע)
-        if (data.action === 'שאילת ציוד' && data.itemsThatWereReserved) {
-            // מאחדים ביטולים ידניים עם פריטים שהופכים משריון להשאלה
-            const existingCancels = finalReserveCancel.split(',').filter(Boolean);
-            const autoCancels = data.itemsThatWereReserved.split(',').filter(Boolean);
-            const combined = [...new Set([...existingCancels, ...autoCancels])];
-            finalReserveCancel = combined.length > 0 ? `,${combined.join(',')},` : '';
+        if (!sheet) {
+            console.error('❌ גיליון "יומן פעולות" לא נמצא');
+            return;
         }
 
-        // שימוש בשמות עמודות במקום אינדקסים
-        const rowData = {
-            'חותמת זמן': formattedDate,
-            'פעולה': data.action || '',
-            'שם': data.userName || '',
-            'טלפון': data.phone || '',
-            'תאריך החזרה צפוי': data.returnDate || '',
-            'מעילים שאולים': data.coats || '',
-            'מכנסיים שאולים': data.pants || '',
-            'פריטים נוספים שאולים': data.additional || '',
-            'פריטים מוחזרים': data.returnItems || '',
-            'פריטים משוריינים': data.reserveItems || '',
-            'שריון מתאריך': data.reserveFrom || '',
-            'שריון עד תאריך': data.reserveTo || '',
-            'ביטול שריון': finalReserveCancel
-        };
+        await sheet.loadHeaderRow();
+        const headers = sheet.headerValues;
 
-        await sheet.addRow(rowData);
-        console.log(`✅ תגובה נרשמה (פעולה: ${data.action})`);
+        // מציאת מספר פעולה הבא
+        const rows = await sheet.getRows();
+        let nextActionNumber = 1;
+
+        if (rows.length > 0) {
+            const actionNumbers = rows
+                .map(r => parseInt(r.get('מס\' פעולה') || '0'))
+                .filter(n => !isNaN(n));
+
+            if (actionNumbers.length > 0) {
+                nextActionNumber = Math.max(...actionNumbers) + 1;
+            }
+        }
+
+        // חותמת זמן
+        const now = new Date();
+        const timestamp = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getFullYear()).slice(-2)} ` +
+            `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+        // שורה חדשה
+        const targetRow = rows.length + 2; // +2 כי שורה 1 היא כותרות
+        await sheet.loadCells(`A${targetRow}:F${targetRow}`);
+
+        // מיפוי עמודות
+        const col = {};
+        headers.forEach((h, i) => col[h.trim()] = i);
+
+        // כתיבה
+        sheet.getCell(targetRow - 1, col['מס\' פעולה']).value = nextActionNumber;
+        sheet.getCell(targetRow - 1, col['חותמת זמן']).value = timestamp;
+        sheet.getCell(targetRow - 1, col['שם']).value = data.userName || '';
+        sheet.getCell(targetRow - 1, col['טלפון']).value = data.phone || '';
+        sheet.getCell(targetRow - 1, col['סוג הפעולה']).value = data.actionType || '';
+        sheet.getCell(targetRow - 1, col['פריטים']).value = data.items || '';
+
+        await sheet.saveUpdatedCells();
+
+        console.log(`✅ נרשם ליומן (מס' ${nextActionNumber}): ${data.actionType} - ${data.userName} - ${data.items}`);
     } catch (err) {
-        console.error('❌ שגיאה ברישום תגובה:', err);
+        console.error('❌ שגיאה בכתיבה ליומן פעולות:', err.message);
+    }
+}
+
+/**
+ * מוצא או יוצר שורה עבור שאילות (בלי תאריכים) בגיליון "ניהול מלאי ממוחשב"
+ * שורת שאילה = טלפון תואם + אין תאריכי שריון
+ */
+async function findOrCreateBorrowRow(phone, userName) {
+    const doc = await getDoc();
+    const sheet = doc.sheetsByTitle['ניהול מלאי ממוחשב'];
+
+    console.log(`🔍 findOrCreateBorrowRow - מחפש שורת שאילה עבור ${phone}...`);
+
+    if (!sheet) {
+        console.error('❌ גיליון "ניהול מלאי ממוחשב" לא נמצא');
+        return null;
+    }
+
+    await sheet.loadHeaderRow();
+    const headers = sheet.headerValues;
+    const rows = await sheet.getRows();
+
+    // חיפוש שורת שאילה קיימת (טלפון תואם + אין תאריכי שריון)
+    for (let i = 0; i < rows.length; i++) {
+        const rowPhone = rows[i].get('טלפון') || '';
+        const reserveDatesFrom = (rows[i].get('שריון מתאריך') || '').toString().trim();
+        const reserveDatesTo = (rows[i].get('שריון עד תאריך') || '').toString().trim();
+
+        // שורת שאילה = טלפון תואם + אין תאריכים
+        if (normalizePhone(rowPhone) === normalizePhone(phone) && !reserveDatesFrom && !reserveDatesTo) {
+            console.log(`✅ נמצאה שורת שאילה קיימת בשורה ${i + 2}`);
+            return { row: rows[i], rowNumber: i + 2, isNew: false };
+        }
+    }
+
+    // יצירת שורת שאילה חדשה
+    console.log(`🆕 יוצר שורת שאילה חדשה עבור ${phone} בשורה ${rows.length + 2}`);
+    const newRowNumber = rows.length + 2;
+    await sheet.loadCells(`A${newRowNumber}:F${newRowNumber}`);
+
+    const col = {};
+    headers.forEach((h, i) => col[h.trim()] = i);
+
+    sheet.getCell(newRowNumber - 1, col['שם']).value = userName || '';
+    sheet.getCell(newRowNumber - 1, col['טלפון']).value = phone || '';
+    sheet.getCell(newRowNumber - 1, col['פריטים שאולים']).value = '';
+    sheet.getCell(newRowNumber - 1, col['פריטים משוריינים']).value = '';
+    sheet.getCell(newRowNumber - 1, col['שריון מתאריך']).value = '';
+    sheet.getCell(newRowNumber - 1, col['שריון עד תאריך']).value = '';
+
+    await sheet.saveUpdatedCells();
+
+    const updatedRows = await sheet.getRows();
+    console.log(`✅ שורת שאילה נוצרה בהצלחה!`);
+    return { row: updatedRows[updatedRows.length - 1], rowNumber: newRowNumber, isNew: true };
+}
+
+/**
+ * יוצר שורה חדשה עבור שריון בגיליון "ניהול מלאי ממוחשב"
+ * כל פעולת שריון מקבלת שורה חדשה משלה
+ */
+async function createReservationRow(phone, userName, reservedItems, reserveDatesFrom, reserveDatesTo) {
+    const doc = await getDoc();
+    const sheet = doc.sheetsByTitle['ניהול מלאי ממוחשב'];
+
+    console.log(`🔍 createReservationRow - יוצר שורת שריון חדשה עבור ${phone}...`);
+
+    if (!sheet) {
+        console.error('❌ גיליון "ניהול מלאי ממוחשב" לא נמצא');
+        return null;
+    }
+
+    await sheet.loadHeaderRow();
+    const headers = sheet.headerValues;
+    const rows = await sheet.getRows();
+
+    const newRowNumber = rows.length + 2;
+    await sheet.loadCells(`A${newRowNumber}:F${newRowNumber}`);
+
+    const col = {};
+    headers.forEach((h, i) => col[h.trim()] = i);
+
+    sheet.getCell(newRowNumber - 1, col['שם']).value = userName || '';
+    sheet.getCell(newRowNumber - 1, col['טלפון']).value = phone || '';
+    sheet.getCell(newRowNumber - 1, col['פריטים שאולים']).value = '';
+    sheet.getCell(newRowNumber - 1, col['פריטים משוריינים']).value = reservedItems || '';
+    sheet.getCell(newRowNumber - 1, col['שריון מתאריך']).value = reserveDatesFrom || '';
+    sheet.getCell(newRowNumber - 1, col['שריון עד תאריך']).value = reserveDatesTo || '';
+
+    await sheet.saveUpdatedCells();
+
+    const updatedRows = await sheet.getRows();
+    console.log(`✅ שורת שריון נוצרה בהצלחה בשורה ${newRowNumber}!`);
+    return { row: updatedRows[updatedRows.length - 1], rowNumber: newRowNumber, isNew: true };
+}
+
+/**
+ * מוצא ומוחק פריטים משורות שריון
+ * אם שורה נשארת ריקה - מוחק את כל השורה
+ */
+async function removeFromReservationRows(phone, itemsToRemove) {
+    const doc = await getDoc();
+    const sheet = doc.sheetsByTitle['ניהול מלאי ממוחשב'];
+
+    console.log(`🔍 removeFromReservationRows - מחפש שורות שריון עבור ${phone}...`);
+
+    if (!sheet) {
+        console.error('❌ גיליון "ניהול מלאי ממוחשב" לא נמצא');
+        return;
+    }
+
+    await sheet.loadHeaderRow();
+    const headers = sheet.headerValues;
+    const rows = await sheet.getRows();
+
+    const col = {};
+    headers.forEach((h, i) => col[h.trim()] = i);
+
+    const itemsArray = itemsToRemove.split(',').filter(x => x.trim());
+
+    // מעבר על כל השורות ומחיקת פריטים משורות שריון (מהסוף להתחלה כדי למנוע בעיות באינדקס)
+    for (let i = rows.length - 1; i >= 0; i--) {
+        const row = rows[i];
+        const rowPhone = row.get('טלפון') || '';
+        const reserveDatesFrom = (row.get('שריון מתאריך') || '').toString().trim();
+        const reserveDatesTo = (row.get('שריון עד תאריך') || '').toString().trim();
+        const reservedItems = row.get('פריטים משוריינים') || '';
+
+        // שורת שריון = טלפון תואם + יש תאריכים + יש פריטים משוריינים
+        if (normalizePhone(rowPhone) === normalizePhone(phone) && reserveDatesFrom && reserveDatesTo && reservedItems) {
+            const currentItems = reservedItems.split(',').filter(x => x.trim());
+            const remainingItems = currentItems.filter(id => !itemsArray.includes(id.trim()));
+
+            console.log(`🔍 שורה ${i + 2}: פריטים נוכחיים: ${currentItems.join(',')}, נשארו: ${remainingItems.join(',')}`);
+
+            // אם לא נשארו פריטים - מחיקת השורה
+            if (remainingItems.length === 0) {
+                await row.delete();
+                console.log(`🗑️ שורה ${i + 2} נמחקה (ריקה)`);
+            } else {
+                // עדכון השורה
+                const rowNumber = i + 2;
+                await sheet.loadCells(`A${rowNumber}:F${rowNumber}`);
+                const newValue = ',' + remainingItems.join(',') + ',';
+                sheet.getCell(rowNumber - 1, col['פריטים משוריינים']).value = newValue;
+                await sheet.saveUpdatedCells();
+                console.log(`✅ שורה ${rowNumber} עודכנה: ${newValue}`);
+            }
+        }
+    }
+}
+
+/**
+ * מוסיף פריטים לעמודה (עם פסיקים)
+ */
+function addItemsToColumn(currentValue, itemsToAdd) {
+    const current = currentValue ? currentValue.toString().split(',').filter(x => x.trim()) : [];
+    const toAdd = itemsToAdd ? itemsToAdd.toString().split(',').filter(x => x.trim()) : [];
+
+    const combined = [...new Set([...current, ...toAdd])];
+    return combined.length > 0 ? ',' + combined.join(',') + ',' : '';
+}
+
+/**
+ * מסיר פריטים מעמודה
+ */
+function removeItemsFromColumn(currentValue, itemsToRemove) {
+    const current = currentValue ? currentValue.toString().split(',').filter(x => x.trim()) : [];
+    const toRemove = itemsToRemove ? itemsToRemove.toString().split(',').filter(x => x.trim()) : [];
+
+    const remaining = current.filter(id => !toRemove.includes(id));
+    return remaining.length > 0 ? ',' + remaining.join(',') + ',' : '';
+}
+
+/**
+ * מסיר תאריכים שמתאימים לפריטים שנמחקו
+ */
+function removeDatesForItems(itemsColumn, datesColumn, itemsToRemove) {
+    const items = itemsColumn ? itemsColumn.toString().split(',').filter(x => x.trim()) : [];
+    const dates = datesColumn ? datesColumn.toString().split(',').map(x => x.trim()) : [];
+    const toRemove = itemsToRemove ? itemsToRemove.toString().split(',').filter(x => x.trim()) : [];
+
+    // מציאת אינדקסים למחיקה
+    const indicesToRemove = [];
+    items.forEach((item, idx) => {
+        if (toRemove.includes(item)) {
+            indicesToRemove.push(idx);
+        }
+    });
+
+    // מחיקת פריטים ותאריכים
+    const newItems = items.filter((_, idx) => !indicesToRemove.includes(idx));
+    const newDates = dates.filter((_, idx) => !indicesToRemove.includes(idx));
+
+    return {
+        items: newItems.length > 0 ? ',' + newItems.join(',') + ',' : '',
+        dates: newDates.length > 0 ? ',' + newDates.join(',') + ',' : ''
+    };
+}
+
+/**
+ * מעדכן גיליון "ניהול מלאי ממוחשב"
+ * לוגיקה חדשה:
+ * - שאילות: שורה אחת לכל אדם (בלי תאריכים)
+ * - שריונים: שורה חדשה לכל פעולת שריון (עם תאריכים)
+ * - החזרות: מחיקה מהשורה הקבועה
+ * - ביטול שריון: מחיקה מהשורה עם התאריכים
+ */
+async function updateInventory(data) {
+    try {
+        const doc = await getDoc();
+        const sheet = doc.sheetsByTitle['ניהול מלאי ממוחשב'];
+
+        if (!sheet) {
+            console.error('❌ גיליון "ניהול מלאי ממוחשב" לא נמצא');
+            return;
+        }
+
+        await sheet.loadHeaderRow();
+        const headers = sheet.headerValues;
+        const col = {};
+        headers.forEach((h, i) => col[h.trim()] = i);
+
+        console.log(`🔧 updateInventory - action: ${data.action}`);
+        console.log(`📦 data:`, JSON.stringify(data, null, 2));
+
+        if (data.action === 'add') {
+            // הוספת פריטים שאולים - שורת שאילה קבועה
+            if (data.borrowedItems) {
+                console.log(`➕ מוסיף פריטים שאולים: ${data.borrowedItems}`);
+                const borrowRow = await findOrCreateBorrowRow(data.phone, data.userName);
+                if (!borrowRow) return;
+
+                const { row, rowNumber } = borrowRow;
+                await sheet.loadCells(`A${rowNumber}:F${rowNumber}`);
+
+                let borrowedItems = sheet.getCell(rowNumber - 1, col['פריטים שאולים']).value || '';
+                borrowedItems = addItemsToColumn(borrowedItems, data.borrowedItems);
+                sheet.getCell(rowNumber - 1, col['פריטים שאולים']).value = borrowedItems;
+
+                await sheet.saveUpdatedCells();
+                console.log(`✅ פריטים שאולים נוספו: ${borrowedItems}`);
+            }
+
+            // הוספת פריטים משוריינים - שורה חדשה לכל פעולת שריון
+            if (data.reservedItems) {
+                console.log(`➕ יוצר שורת שריון חדשה: ${data.reservedItems}`);
+                await createReservationRow(
+                    data.phone,
+                    data.userName,
+                    data.reservedItems,
+                    data.reserveDatesFrom,
+                    data.reserveDatesTo
+                );
+            }
+        } else if (data.action === 'remove') {
+            // הסרת פריטים שאולים - מהשורה הקבועה
+            if (data.borrowedItems) {
+                console.log(`➖ מוחק פריטים שאולים: ${data.borrowedItems}`);
+                const borrowRow = await findOrCreateBorrowRow(data.phone, data.userName);
+                if (!borrowRow) return;
+
+                const { row, rowNumber } = borrowRow;
+                await sheet.loadCells(`A${rowNumber}:F${rowNumber}`);
+
+                let borrowedItems = sheet.getCell(rowNumber - 1, col['פריטים שאולים']).value || '';
+                borrowedItems = removeItemsFromColumn(borrowedItems, data.borrowedItems);
+                sheet.getCell(rowNumber - 1, col['פריטים שאולים']).value = borrowedItems;
+
+                await sheet.saveUpdatedCells();
+                console.log(`✅ פריטים שאולים הוסרו: ${data.borrowedItems}`);
+
+                // אם השורה ריקה - מחיקה
+                if (!borrowedItems || borrowedItems === ',,') {
+                    await row.delete();
+                    console.log(`🗑️ שורת שאילה נמחקה (ריקה)`);
+                }
+            }
+
+            // הסרת פריטים משוריינים - מהשורות המתאימות
+            if (data.reservedItems) {
+                console.log(`➖ מוחק פריטים משוריינים: ${data.reservedItems}`);
+                await removeFromReservationRows(data.phone, data.reservedItems);
+            }
+        } else if (data.action === 'move') {
+            // העברה ממשוריינים לשאולים
+            if (data.items) {
+                console.log(`🔄 מעביר פריטים ממשוריינים לשאולים: ${data.items}`);
+
+                // הסרה מהשורות המשוריינות
+                await removeFromReservationRows(data.phone, data.items);
+
+                // הוספה לשורת השאילה
+                const borrowRow = await findOrCreateBorrowRow(data.phone, data.userName);
+                if (!borrowRow) return;
+
+                const { row, rowNumber } = borrowRow;
+                await sheet.loadCells(`A${rowNumber}:F${rowNumber}`);
+
+                let borrowedItems = sheet.getCell(rowNumber - 1, col['פריטים שאולים']).value || '';
+                borrowedItems = addItemsToColumn(borrowedItems, data.items);
+                sheet.getCell(rowNumber - 1, col['פריטים שאולים']).value = borrowedItems;
+
+                await sheet.saveUpdatedCells();
+                console.log(`🔄 פריטים הועברו לשורת השאילה: ${borrowedItems}`);
+            }
+        }
+
+        console.log(`✅ מלאי עודכן בהצלחה`);
+    } catch (err) {
+        console.error('❌ שגיאה בעדכון מלאי:', err.message);
     }
 }
 
@@ -269,5 +628,8 @@ module.exports = {
     getBorrowedItemsByPhone,
 	hasDateOverlap,
     parseDate,
-	addResponse
+    addToLog,
+    updateInventory,
+    getDayBefore,
+    getEarliestDate
 };

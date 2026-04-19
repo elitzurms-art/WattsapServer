@@ -7,7 +7,7 @@ const sessions = {};
 // ===============================
 // שמירת סשן
 // ===============================
-async function saveSession(phone, state, payload = '', reserveFrom, reserveTo) {
+async function saveSession(phone, state, payload = '', reserveFrom, reserveTo, noTTL = false) {
     try {
         const userPhone = normalizePhone(phone);
 
@@ -25,13 +25,17 @@ async function saveSession(phone, state, payload = '', reserveFrom, reserveTo) {
         // אם היה טיימאאוט קודם – נבטל אותו
         if (sessions[userPhone].timeout) clearTimeout(sessions[userPhone].timeout);
 
-        // הגדרת טיימאאוט חדש למחיקה אוטומטית אחרי TTL
-        sessions[userPhone].timeout = setTimeout(() => {
-            delete sessions[userPhone];
-            console.log(`[Sessions] הסשן נמחק אוטומטית אחרי 30 דקות עבור: ${userPhone}`);
-        }, SESSIONS_TTL_MS);
-
-        console.log(`[Sessions] סשן נשמר עבור: ${userPhone}`);
+        if (noTTL) {
+            // ללא TTL - הסשן נשאר פתוח עד מחיקה ידנית
+            console.log(`[Sessions] סשן נשמר ללא TTL (נשאר פתוח) עבור: ${userPhone}`);
+        } else {
+            // הגדרת טיימאאוט חדש למחיקה אוטומטית אחרי TTL
+            sessions[userPhone].timeout = setTimeout(() => {
+                delete sessions[userPhone];
+                console.log(`[Sessions] הסשן נמחק אוטומטית אחרי 30 דקות עבור: ${userPhone}`);
+            }, SESSIONS_TTL_MS);
+            console.log(`[Sessions] סשן נשמר עם TTL (30 דקות) עבור: ${userPhone}`);
+        }
     } catch (err) {
         console.error('❌ שגיאה בשמירת סשן:', err.message);
     }
