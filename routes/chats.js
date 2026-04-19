@@ -43,10 +43,10 @@ module.exports = function chatsRoutes(client) {
         const limit = Math.max(1, parseInt(req.query.limit, 10) || 50);
         const before = req.query.before ? parseInt(req.query.before, 10) : null;
 
-        let chat = await client.getChatById(req.params.chatId);
+        let chat = await client.getChatById(req.params.chatId).catch(() => null);
         if (!chat) {
-            await client.getChats(); // רענון רשימת הצ'אטים
-            chat = await client.getChatById(req.params.chatId);
+            const all = await client.getChats();
+            chat = all.find(c => c.id._serialized === req.params.chatId) || null;
         }
         if (!chat) return bad(res, 'Chat not found', 404);
         let messages = await chat.fetchMessages({ limit: before ? limit * 2 : limit });
