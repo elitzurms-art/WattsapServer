@@ -252,6 +252,54 @@ client.on('message', async (msg) => {
 
 
 // =======================
+// העברת הקלטות ← אליעזר ← קלוד קוד
+// =======================
+const ELIEZER_CHAT_ID    = '972559571223@c.us';
+const ELIEZER_LID        = '158360343175264@lid';
+const CLAUDE_CODE_GROUP  = '120363425634481122@g.us';
+const ELIEZER_REPLY_WINDOW_MS = 2 * 60 * 1000; // 2 דקות
+
+let lastForwardedToEliezerAt = 0;
+
+// שלב 1: הקלטה לעצמי → מעביר לאליעזר
+client.on('message_create', async (msg) => {
+    if (!msg.fromMe) return;
+    if (msg.from !== msg.to) return;
+    if (!['audio', 'ptt', 'voice'].includes(msg.type)) return;
+
+    console.log(`🎙️ הקלטה עצמית (${msg.type}), מעביר לאליעזר...`);
+    try {
+        const chat = await client.getChatById(ELIEZER_CHAT_ID);
+        await msg.forward(chat);
+        lastForwardedToEliezerAt = Date.now();
+        console.log('✅ הועבר לאליעזר');
+    } catch (err) {
+        console.error('❌ שגיאה בהעברה לאליעזר:', err.message);
+    }
+});
+
+// שלב 2: תשובה מאליעזר תוך 2 דקות → מעביר לקלוד קוד
+client.on('message', async (msg) => {
+    if (msg.fromMe) return;
+    if (lastForwardedToEliezerAt === 0) return;
+    if (Date.now() - lastForwardedToEliezerAt > ELIEZER_REPLY_WINDOW_MS) return;
+
+    const isFromEliezer = msg.from === ELIEZER_CHAT_ID || msg.from === ELIEZER_LID;
+    if (!isFromEliezer) return;
+
+    console.log('📝 תמלול מאליעזר התקבל, מעביר לקלוד קוד...');
+    lastForwardedToEliezerAt = 0;
+    try {
+        const group = await client.getChatById(CLAUDE_CODE_GROUP);
+        await msg.forward(group);
+        console.log('✅ הועבר לקלוד קוד');
+    } catch (err) {
+        console.error('❌ שגיאה בהעברה לקלוד קוד:', err.message);
+    }
+});
+
+
+// =======================
 // Start
 // =======================
 console.log('🚀 מתחיל להפעיל את הבוט...');
