@@ -1,5 +1,9 @@
 const express = require('express');
 const bodyParser = require('body-parser');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const { MessageMedia } = require('whatsapp-web.js');
 const { normalizePhone } = require('./sheets/helpers');
 const { sendToWhatsApp } = require('./chat-bridge');
 
@@ -88,6 +92,31 @@ function createApiServer(whatsappClient) {
         } catch (err) {
             console.error(`❌ Failed to send to ${formattedPhone}:`, err);
             res.status(500).json({ ok: false, error: 'Failed to send message', details: err.toString() });
+        }
+    });
+
+    // === שליחת אודיו מ-base64 (PTT / Voice Message) ===
+    app.post('/send/ptt', authenticate, async (req, res) => {
+        try {
+            const { phone, audioBase64, mimetype = 'audio/mpeg' } = req.body;
+            if (!phone || !audioBase64) return res.status(400).json({ ok: false, error: 'Missing phone or audioBase64' });
+
+            const { toChatId } = require('./routes/utils');
+            const chatId = toChatId(phone);
+            if (!chatId) return res.status(400).json({ ok: false, error: 'Invalid phone' });
+
+            const ext = mimetype.split('/')[1] || 'mp3';
+            const tmpFile = path.join(os.tmpdir(), `ptt_${Date.now()}.${ext}`);
+            fs.writeFileSync(tmpFile, Buffer.from(audioBase64, 'base64'));
+
+            const media = MessageMedia.fromFilePath(tmpFile);
+            const sent = await whatsappClient.sendMessage(chatId, media, { sendAudioAsVoice: true });
+            fs.unlinkSync(tmpFile);
+
+            return res.json({ ok: true, id: sent.id._serialized, chatId });
+        } catch (err) {
+            console.error('❌ /send/ptt error:', err);
+            return res.status(500).json({ ok: false, error: err.message });
         }
     });
 
