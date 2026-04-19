@@ -7,6 +7,7 @@ const path = require('path');
 const { handleMessage } = require('./handlers');
 const { getSession } = require('./sheets/sessions');
 const { handleReminderResponse } = require('./handlers/reminderResponse');
+const { apiSentIds } = require('./shared');
 console.log('✅ כל המודולים נטענו');
 
 
@@ -266,6 +267,7 @@ client.on('message_create', async (msg) => {
     if (!msg.fromMe) return;
     if (msg.from !== msg.to) return;
     if (!['audio', 'ptt', 'voice'].includes(msg.type)) return;
+    if (apiSentIds.delete(msg.id._serialized)) return; // הודעה שנשלחה ע"י ה-API — דלג
 
     console.log(`🎙️ הקלטה עצמית (${msg.type}), מעביר לאליעזר...`);
     try {

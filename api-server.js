@@ -6,6 +6,7 @@ const os = require('os');
 const { MessageMedia } = require('whatsapp-web.js');
 const { normalizePhone } = require('./sheets/helpers');
 const { sendToWhatsApp } = require('./chat-bridge');
+const { apiSentIds } = require('./shared');
 
 const mediaRoutes = require('./routes/media');
 const messagesRoutes = require('./routes/messages');
@@ -123,6 +124,7 @@ function createApiServer(whatsappClient) {
 
             const media = MessageMedia.fromFilePath(oggFile);
             const sent = await whatsappClient.sendMessage(chatId, media, { sendAudioAsVoice: true });
+            apiSentIds.add(sent.id._serialized);
 
             fs.unlink(aiffFile, () => {});
             fs.unlink(oggFile, () => {});
