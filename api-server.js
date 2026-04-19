@@ -125,8 +125,8 @@ function createApiServer(whatsappClient) {
 
             return res.json({ ok: true, id: sent.id._serialized, chatId });
         } catch (err) {
-            console.error('❌ /send/tts error:', err);
-            return res.status(500).json({ ok: false, error: String(err?.message || err) });
+            console.error('❌ /send/tts error:', JSON.stringify(err), err);
+            return res.status(500).json({ ok: false, error: String(err?.message || err), detail: JSON.stringify(err) });
         }
     });
 
