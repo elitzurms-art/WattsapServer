@@ -95,6 +95,41 @@ function createApiServer(whatsappClient) {
         }
     });
 
+    // === TTS — הפיכת טקסט להודעה קולית ===
+    app.post('/send/tts', authenticate, async (req, res) => {
+        try {
+            const { phone, text, voice = 'he-IL-HilaNeural' } = req.body;
+            if (!phone || !text) return res.status(400).json({ ok: false, error: 'Missing phone or text' });
+
+            const { toChatId } = require('./routes/utils');
+            const chatId = toChatId(phone);
+            if (!chatId) return res.status(400).json({ ok: false, error: 'Invalid phone' });
+
+            const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
+            const tmpFile = path.join(os.tmpdir(), `tts_${Date.now()}.mp3`);
+
+            const tts = new MsEdgeTTS();
+            await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+            await new Promise((resolve, reject) => {
+                const readable = tts.toStream(text);
+                const writable = fs.createWriteStream(tmpFile);
+                readable.pipe(writable);
+                writable.on('finish', resolve);
+                writable.on('error', reject);
+                readable.on('error', reject);
+            });
+
+            const media = MessageMedia.fromFilePath(tmpFile);
+            const sent = await whatsappClient.sendMessage(chatId, media, { sendAudioAsVoice: true });
+            fs.unlink(tmpFile, () => {});
+
+            return res.json({ ok: true, id: sent.id._serialized, chatId });
+        } catch (err) {
+            console.error('❌ /send/tts error:', err);
+            return res.status(500).json({ ok: false, error: err.message });
+        }
+    });
+
     // === שליחת אודיו מ-base64 (PTT / Voice Message) ===
     app.post('/send/ptt', authenticate, async (req, res) => {
         try {
