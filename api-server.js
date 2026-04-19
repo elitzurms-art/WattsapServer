@@ -107,23 +107,25 @@ function createApiServer(whatsappClient) {
 
             const { execFile } = require('child_process');
             const aiffFile = path.join(os.tmpdir(), `tts_${Date.now()}.aiff`);
-            const m4aFile  = aiffFile.replace('.aiff', '.m4a');
+
+            const oggFile = aiffFile.replace('.aiff', '.ogg');
 
             // שלב 1: say → AIFF
             await new Promise((resolve, reject) => {
                 execFile('say', ['-v', voice, '-o', aiffFile, text], (err) => err ? reject(err) : resolve());
             });
 
-            // שלב 2: AIFF → M4A
+            // שלב 2: AIFF → OGG/OPUS (פורמט נייטיב של WhatsApp PTT)
             await new Promise((resolve, reject) => {
-                execFile('afconvert', ['-f', 'mp4f', '-d', 'aac', aiffFile, m4aFile], (err) => err ? reject(err) : resolve());
+                execFile('ffmpeg', ['-y', '-i', aiffFile, '-c:a', 'libopus', '-b:a', '32k', oggFile],
+                    (err) => err ? reject(err) : resolve());
             });
 
-            const media = MessageMedia.fromFilePath(m4aFile);
+            const media = MessageMedia.fromFilePath(oggFile);
             const sent = await whatsappClient.sendMessage(chatId, media, { sendAudioAsVoice: true });
 
             fs.unlink(aiffFile, () => {});
-            fs.unlink(m4aFile, () => {});
+            fs.unlink(oggFile, () => {});
 
             return res.json({ ok: true, id: sent.id._serialized, chatId });
         } catch (err) {
