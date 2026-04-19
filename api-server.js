@@ -111,12 +111,12 @@ function createApiServer(whatsappClient) {
             const tts = new MsEdgeTTS();
             await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
             await new Promise((resolve, reject) => {
-                const readable = tts.toStream(text);
+                const { audioStream } = tts.toStream(text);
                 const writable = fs.createWriteStream(tmpFile);
-                readable.pipe(writable);
+                audioStream.pipe(writable);
                 writable.on('finish', resolve);
                 writable.on('error', reject);
-                readable.on('error', reject);
+                audioStream.on('error', reject);
             });
 
             const media = MessageMedia.fromFilePath(tmpFile);
@@ -126,7 +126,7 @@ function createApiServer(whatsappClient) {
             return res.json({ ok: true, id: sent.id._serialized, chatId });
         } catch (err) {
             console.error('❌ /send/tts error:', err);
-            return res.status(500).json({ ok: false, error: err.message });
+            return res.status(500).json({ ok: false, error: String(err?.message || err) });
         }
     });
 
