@@ -82,15 +82,19 @@ function createApiServer(whatsappClient) {
         }
 
         try {
+            const { toChatId } = require('./routes/utils');
+            const chatId = source === 'AppsScript'
+                ? `${formattedPhone}@c.us`
+                : toChatId(phone);
+
             let sent;
-            if (source === 'AppsScript') {
-                formattedPhone = `${formattedPhone}@c.us`;
-                sent = await whatsappClient.sendMessage(formattedPhone, message);
-            } else {
-                sent = await sendToWhatsApp(whatsappClient, formattedPhone, message);
+            try {
+                sent = await whatsappClient.sendMessage(chatId, message);
+            } catch (e) {
+                await sendToWhatsApp(whatsappClient, formattedPhone, message);
             }
 
-            res.json({ ok: true, phone: formattedPhone, id: sent?.id?._serialized || null, timestamp: new Date().toISOString() });
+            res.json({ ok: true, phone: chatId, id: sent?.id?._serialized || null, timestamp: new Date().toISOString() });
         } catch (err) {
             console.error(`❌ Failed to send to ${formattedPhone}:`, err);
             res.status(500).json({ ok: false, error: 'Failed to send message', details: err.toString() });
