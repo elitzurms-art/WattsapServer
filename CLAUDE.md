@@ -2,17 +2,56 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Communication Style
+## MCP Server (whatsapp_server.py)
 
-**IMPORTANT**: When communicating with the user in Hebrew, use "Reverse Hebrew" format:
-1. Reverse each word letter-by-letter (e.g., "שלום" becomes "םולש")
-2. Reverse the order of words in the sentence (last word first)
+`whatsapp_server.py` is a **Python FastMCP server** that wraps the remote WhatsApp bot REST API as Claude tools.
 
-Example:
-- Normal: "אני יכול לעזור לך"
-- Reverse Hebrew: "ךל רוזעל לוכי ינא"
+- **Backend URL**: `http://elitzur.ddns.net:1000`
+- **Auth**: header `x-api-key: a17d2A17d2`
+- **Framework**: `fastmcp` (pip: `mcp`)
+- **HTTP client**: `httpx` (async)
+- **Config**: `~/.claude/mcp.json` on the local machine
 
-This applies to ALL Hebrew responses to the user. Code, comments, and English text remain unchanged.
+### HTTP helpers
+
+| Helper | Method | Body type |
+|--------|--------|-----------|
+| `_get(path, params)` | GET | query params |
+| `_post(path, body)` | POST | JSON |
+| `_patch(path, body)` | PATCH | JSON |
+| `_delete(path, params)` | DELETE | query params |
+| `_delete_body(path, body)` | DELETE | JSON body — use when DELETE needs a JSON body (e.g. remove participants) |
+
+### Adding a new tool
+
+```python
+@mcp.tool()
+async def do_something(param: str) -> dict:
+    """One-line description visible to Claude."""
+    return await _post("/some/path", {"param": param})
+```
+
+After editing, commit + push, then the server pulls and Claude Code restarts the MCP.
+
+### All 55 tools
+
+**Health & Core**: `check_whatsapp_health`, `get_whatsapp_me`, `get_whatsapp_state`
+
+**Send**: `send_whatsapp_message`, `send_whatsapp_image`, `send_whatsapp_video`, `send_whatsapp_audio`, `send_whatsapp_document`, `send_whatsapp_location`, `send_whatsapp_contact`, `send_whatsapp_sticker`, `send_whatsapp_tts`
+
+**Messages**: `get_whatsapp_message`, `get_whatsapp_message_media`, `forward_whatsapp_message`, `delete_whatsapp_message`, `react_to_whatsapp_message`, `reply_to_whatsapp_message`
+
+**Chats**: `get_whatsapp_chats`, `get_whatsapp_chat_messages`, `mark_whatsapp_chat_read`, `mark_whatsapp_chat_unread`, `send_whatsapp_typing`, `send_whatsapp_recording`, `archive_whatsapp_chat`, `unarchive_whatsapp_chat`, `pin_whatsapp_chat`, `unpin_whatsapp_chat`, `mute_whatsapp_chat`, `delete_whatsapp_chat`, `clear_whatsapp_chat`
+
+**Contacts**: `get_whatsapp_contacts`, `search_whatsapp_contacts`, `get_whatsapp_contact`, `get_whatsapp_contact_profile_pic`, `get_whatsapp_contact_status`, `block_whatsapp_contact`, `unblock_whatsapp_contact`
+
+**Groups**: `create_whatsapp_group`, `get_whatsapp_group`, `get_whatsapp_group_invite_code`, `leave_whatsapp_group`, `add_whatsapp_group_participants`, `remove_whatsapp_group_participants`, `promote_whatsapp_group_admin`, `demote_whatsapp_group_admin`, `update_whatsapp_group`, `set_whatsapp_group_picture`, `revoke_whatsapp_group_invite`
+
+**Webhooks**: `get_whatsapp_webhooks`, `register_whatsapp_webhook`, `delete_whatsapp_webhook`
+
+**Session**: `get_whatsapp_qr`, `restart_whatsapp_bot`, `logout_whatsapp`
+
+---
 
 ## Project Overview
 

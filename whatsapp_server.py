@@ -33,6 +33,12 @@ async def _patch(path: str, body: dict) -> dict:
         return r.json()
 
 
+async def _delete_body(path: str, body: dict) -> dict:
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.delete(f"{BASE_URL}{path}", headers=HEADERS, json=body)
+        return r.json()
+
+
 # ── Health / Core ─────────────────────────────────────────────────────────────
 
 @mcp.tool()
@@ -313,7 +319,7 @@ async def add_whatsapp_group_participants(group_id: str, phones: list[str]) -> d
 @mcp.tool()
 async def remove_whatsapp_group_participants(group_id: str, phones: list[str]) -> dict:
     """Remove participants from a WhatsApp group. phones: list of E.164 numbers."""
-    return await _delete(f"/groups/{group_id}/participants", {"phones": phones})
+    return await _delete_body(f"/groups/{group_id}/participants", {"phones": phones})
 
 
 @mcp.tool()
@@ -325,7 +331,7 @@ async def promote_whatsapp_group_admin(group_id: str, phones: list[str]) -> dict
 @mcp.tool()
 async def demote_whatsapp_group_admin(group_id: str, phones: list[str]) -> dict:
     """Demote admins to regular participants in a WhatsApp group. phones: list of E.164 numbers."""
-    return await _delete(f"/groups/{group_id}/admins", {"phones": phones})
+    return await _delete_body(f"/groups/{group_id}/admins", {"phones": phones})
 
 
 @mcp.tool()
