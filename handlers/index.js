@@ -41,7 +41,7 @@ async function handleMessage(client, msg, session) {
 		// שכבת AI rescue: אם המטפל הקשיח לא יצליח לפרש את ההודעה — ה-AI מתערב.
 		// רץ רק כשיש סשן פעיל (לא ב-ANUNIMI) ורק אם יש טקסט.
 		// ===============================
-		if (currentState !== 'ANUNIMI' && text && process.env.ANTHROPIC_API_KEY) {
+		if (currentState !== 'ANUNIMI' && text && process.env.GEMINI_API_KEY) {
 			try {
 				const inventorySnapshot = await loadInventorySnapshot(currentState, phone);
 				const result = await rescueMessage({
