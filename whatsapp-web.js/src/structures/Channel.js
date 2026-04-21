@@ -303,7 +303,7 @@ class Channel extends Base {
 
             if (searchOptions && searchOptions.limit > 0) {
                 while (msgs.length < searchOptions.limit) {
-                    const loadedMessages = await window.Store.ConversationMsgs.loadEarlierMsgs(channel);
+                    const loadedMessages = await window.Store.ConversationMsgs.loadEarlierMsgs(channel, channel.msgs);
                     if (!loadedMessages || !loadedMessages.length) break;
                     msgs = [...loadedMessages.filter(msgFilter), ...msgs];
                 }
