@@ -3,6 +3,24 @@ const inventory = require('../sheets/inventory');
 const sessions = require('../sheets/sessions');
 const { normalizePhone, validateSelection } = require('../sheets/helpers');
 const { sendWhatsAppButtons, sendWhatsAppText } = require('../sheets/whatsapp');
+const { rescueMessage } = require('../ai/rescue');
+
+// שליפה נקודתית של רשימת פריטים רלוונטית למצב — להעברה ל-AI כ-context
+async function loadInventorySnapshot(state, phone) {
+	try {
+		if (state === 'RETURN_SELECT' || state === 'RETURN_CONFIRM') {
+			const items = await inventory.getBorrowedItemsByPhone(phone);
+			return [...(items.coats || []), ...(items.pants || []), ...(items.additional || [])];
+		}
+		if (['BORROW_SELECT', 'RESERVE_SELECT', 'BORROW_CONFIRM', 'RESERVE_CONFIRM'].includes(state)) {
+			const items = await inventory.getAvailableItems();
+			return [...(items.coats || []), ...(items.pants || []), ...(items.additional || [])];
+		}
+		return null;
+	} catch {
+		return null;
+	}
+}
 
 async function handleMessage(client, msg, session) {
 	try {
@@ -18,6 +36,43 @@ async function handleMessage(client, msg, session) {
 
 		// הדפסה מעודכנת הכוללת את שם המשתמש
 		console.log(`switch- Name: ${userName} | Phone: ${phone} | State: ${currentState} | Text: ${text}`);
+
+		// ===============================
+		// שכבת AI rescue: אם המטפל הקשיח לא יצליח לפרש את ההודעה — ה-AI מתערב.
+		// רץ רק כשיש סשן פעיל (לא ב-ANUNIMI) ורק אם יש טקסט.
+		// ===============================
+		if (currentState !== 'ANUNIMI' && text && process.env.ANTHROPIC_API_KEY) {
+			try {
+				const inventorySnapshot = await loadInventorySnapshot(currentState, phone);
+				const result = await rescueMessage({
+					state: currentState,
+					text,
+					phone,
+					userName,
+					inventorySnapshot,
+					sessionPayload: session?.payload,
+					source: 'text'
+				});
+
+				if (result.action === 'reply') {
+					await client.sendMessage(msg.from, result.message);
+					return;
+				}
+				if (result.action === 'cancel') {
+					await sessions.clearSession(phone);
+					await client.sendMessage(msg.from,
+						'התהליך בוטל\n😊 תודה שהשתמשת בגמ"ח סקי!\n\nעל מנת לשאול, להחזיר או לשריין- רשום מחדש "גמ"ח סקי"');
+					return;
+				}
+				if (result.action === 'rewrite' && result.newText) {
+					console.log(`🧠 AI rewrite: "${text}" → "${result.newText}"`);
+					msg.body = result.newText;
+				}
+				// passthrough — ממשיך כרגיל
+			} catch (aiErr) {
+				console.error('❌ שגיאה ב-AI rescue, ממשיך עם הטקסט המקורי:', aiErr.message);
+			}
+		}
 
 		switch (currentState) {
 			

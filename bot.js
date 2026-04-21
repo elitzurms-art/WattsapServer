@@ -8,6 +8,7 @@ const { handleMessage } = require('./handlers');
 const { getSession } = require('./sheets/sessions');
 const { handleReminderResponse } = require('./handlers/reminderResponse');
 const { apiSentIds } = require('./shared');
+const { isTrigger: isEntryTrigger } = require('./ai/trigger');
 console.log('✅ כל המודולים נטענו');
 
 
@@ -213,9 +214,8 @@ client.on('message', async (msg) => {
     // 2. קבלת סשן
     const session = await getSession(phone);
 
-    // 3. בדיקת טריגר
-    const triggerRegex = /^(גמ["״]?ח סקי|dn["״]?j xeh)$/i;
-    const isTrigger = triggerRegex.test(text);
+    // 3. בדיקת טריגר (עם וריאציות מורחבות — ai/trigger.js)
+    const isTrigger = isEntryTrigger(text);
 
     // 4. ניתוב לפי מצב הסשן
     try {
