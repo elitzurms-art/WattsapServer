@@ -22,28 +22,3 @@ diff --git a/node_modules/whatsapp-web.js/src/structures/Channel.js b/node_modul
                      if (!loadedMessages || !loadedMessages.length) break;
                      msgs = [...loadedMessages.filter(msgFilter), ...msgs];
                  }
-diff --git a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
---- a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
-+++ b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
-@@ -9,17 +9,10 @@ exports.LoadUtils = () => {
-         return await window.Store.ForwardUtils.forwardMessages({'chat': chat, 'msgs' : [msg], 'multicast': true, 'includeCaption': true, 'appendedText' : undefined});
-     };
-
--    window.WWebJS.sendSeen = async (chatId) => {
--        const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
--        if (chat) {
--            window.Store.WAWebStreamModel.Stream.markAvailable();
--            await window.Store.SendSeen.sendSeen(chat);
--            window.Store.WAWebStreamModel.Stream.markUnavailable();
--            return true;
--        }
--        return false;
--    };
--
-+    window.WWebJS.sendSeen = async (chatId) => {
-+        // disabled to prevent markedUnread crash
-+        return true;
-+    };
-     window.WWebJS.sendMessage = async (chat, content, options = {}) => {
-         const isChannel = window.Store.ChatGetters.getIsNewsletter(chat);
-         const isStatus = window.Store.ChatGetters.getIsBroadcast(chat);
