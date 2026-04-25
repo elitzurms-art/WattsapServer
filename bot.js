@@ -32,6 +32,22 @@ process.on('unhandledRejection', (reason) => {
         console.log('⚠️ הודעה לא נמצאה – דולג');
         return;
     }
+    // שגיאות רשת/הפעלה ראשונית — יוצאים כדי ש-start.sh ירים מחדש עם cleanup
+    const fatalNet = [
+        'ERR_INTERNET_DISCONNECTED',
+        'ERR_NAME_NOT_RESOLVED',
+        'ERR_NETWORK_CHANGED',
+        'ERR_PROXY_CONNECTION_FAILED',
+        'ERR_CONNECTION_REFUSED',
+        'ERR_CONNECTION_TIMED_OUT',
+        'browser is already running',
+        'Target closed',
+        'detached Frame',
+    ];
+    if (fatalNet.some(s => reason?.message?.includes(s))) {
+        console.error('💥 שגיאת רשת/דפדפן — יוצא לאתחול מלא ע"י start.sh:', reason?.message);
+        process.exit(1);
+    }
     console.error('💥 שגיאה לא מטופלת:', reason);
 });
 
