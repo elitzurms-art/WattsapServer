@@ -43,6 +43,8 @@ process.on('unhandledRejection', (reason) => {
         'browser is already running',
         'Target closed',
         'detached Frame',
+        'auth timeout',
+        'Authentication failure',
     ];
     if (fatalNet.some(s => reason?.message?.includes(s))) {
         console.error('💥 שגיאת רשת/דפדפן — יוצא לאתחול מלא ע"י start.sh:', reason?.message);
