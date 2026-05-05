@@ -53,6 +53,40 @@ After editing, commit + push, then the server pulls and Claude Code restarts the
 
 ---
 
+## Auto-start (macOS LaunchDaemon)
+
+The bot runs as a **system LaunchDaemon** so it starts at boot without requiring a user to log in.
+
+- **Plist**: `/Library/LaunchDaemons/com.elitzur.wattsap.plist` (owner `root:wheel`, mode `644`)
+- **Runs as**: user `elitzurserver` / group `staff` (set via `UserName`/`GroupName` keys; needed because Chrome user-data, credentials, and `node_modules` live under `/Users/elitzurserver`)
+- **Program**: `/bin/bash /Users/elitzurserver/Projects/WattsapServer4.0/start.sh`
+- **WorkingDirectory**: `/Users/elitzurserver/Projects/WattsapServer4.0`
+- **Env**: `HOME=/Users/elitzurserver`, `PATH` includes `/usr/local/bin` and `/opt/homebrew/bin`
+- **`RunAtLoad=true`**, **`KeepAlive=true`**, `ThrottleInterval=10`
+- **Log**: stdout+stderr → `/tmp/wattsap-start.log`
+
+`start.sh` itself loops `node bot.js` with a 5-second backoff and runs a `cleanup` step before each launch (kills leftover Puppeteer Chrome processes and removes stale `SingletonLock`/`SingletonSocket`/`SingletonCookie` files in `.wwebjs_auth/session`).
+
+### Manage the daemon
+
+```bash
+# Status
+sudo launchctl print system/com.elitzur.wattsap | head -20
+
+# Stop / start
+sudo launchctl bootout system/com.elitzur.wattsap
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.elitzur.wattsap.plist
+
+# Tail log
+tail -f /tmp/wattsap-start.log
+```
+
+After editing the plist, you must `bootout` then `bootstrap` again — `launchctl load -w` is deprecated for daemons.
+
+The old user-level LaunchAgent at `~/Library/LaunchAgents/com.elitzur.wattsap.plist` was removed during the migration; do not recreate it (would cause two instances fighting over port 1000).
+
+---
+
 ## Project Overview
 
 **WattsapServer** is a WhatsApp bot for managing a ski equipment lending library ("גמ"ח סקי בגולן"). The bot handles borrowing, returning, and reserving ski equipment (coats, pants, goggles, etc.) through WhatsApp conversations with users. All inventory and session data is stored in Google Sheets.
