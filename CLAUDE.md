@@ -2,6 +2,32 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## שליחת הודעות עברית מ-Bash/Script
+
+כשצריך לשלוח הודעת WhatsApp עם עברית מתוך Bash או סקריפט — **השתמש תמיד ב-Python**, לא ב-PowerShell. PowerShell מקלקל את ה-encoding של עברית ושולח סימני שאלה.
+
+```python
+PYTHONHOME=/c/OSGeo4W/apps/Python312 /c/OSGeo4W/bin/python3 -c "
+import json
+from urllib.request import urlopen, Request
+req = Request('https://bot.elitzurgames.com/send',
+    data=json.dumps({'phone': 'PHONE', 'message': 'הודעה בעברית'}).encode('utf-8'),
+    headers={'x-api-key': 'a17d2A17d2', 'Content-Type': 'application/json; charset=utf-8'})
+print(json.loads(urlopen(req).read()))
+"
+```
+
+## מחיקת הודעות
+
+כשמשתמש מבקש למחוק הודעה — **שאל תחילה איזו מחיקה הוא רוצה** והצג את האפשרויות:
+
+1. **מחיקה אצלי בלבד** — ההודעה נעלמת רק ממך, הצד השני עדיין רואה אותה
+2. **מחיקה לכולם** — ההודעה נמחקת אצל כולם (בתנאי שחלפו פחות מ-60 שניות מהשליחה)
+
+**כלל קריטי**: אם בוצעה מחיקה "אצלי בלבד" — **לא ניתן עוד לבצע "מחיקה לכולם"** על אותה הודעה. WhatsApp חוסם זאת ומחזיר שגיאה 500. אל תנסה שוב.
+
+---
+
 ## MCP Server (whatsapp_server.py)
 
 `whatsapp_server.py` is a **Python FastMCP server** that wraps the remote WhatsApp bot REST API as Claude tools.

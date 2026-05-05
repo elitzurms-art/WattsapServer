@@ -16,7 +16,6 @@ logging.basicConfig(
     format="%(asctime)s %(message)s",
     handlers=[
         logging.FileHandler(Path(__file__).parent / "claude_listener.log", encoding="utf-8"),
-        logging.StreamHandler(),
     ],
 )
 

@@ -143,9 +143,17 @@ async def forward_whatsapp_message(message_id: str, to_phone: str) -> dict:
 
 
 @mcp.tool()
-async def delete_whatsapp_message(message_id: str, for_everyone: bool = False) -> dict:
-    """Delete a WhatsApp message. for_everyone=True deletes for all participants."""
-    return await _delete(f"/messages/{message_id}", {"everyone": str(for_everyone).lower()})
+async def delete_whatsapp_message(message_id: str, for_everyone: bool) -> dict:
+    """Delete a WhatsApp message.
+    IMPORTANT: Always ask the user which deletion type they want before calling:
+      - for_everyone=False: delete only for me (recipient still sees the message)
+      - for_everyone=True:  delete for everyone (only works within ~60 seconds of sending)
+    WARNING: Once deleted with for_everyone=False, deleting for everyone is no longer possible.
+    WhatsApp blocks it (returns 500). Do not retry with for_everyone=True in that case."""
+    result = await _delete(f"/messages/{message_id}", {"everyone": str(for_everyone).lower()})
+    if for_everyone and isinstance(result, dict) and not result.get("everyone"):
+        result["warning"] = "נמחק אצלי בלבד — לא ניתן למחוק לכולם (חלף הזמן או נמחק קודם אצלי בלבד)"
+    return result
 
 
 @mcp.tool()
