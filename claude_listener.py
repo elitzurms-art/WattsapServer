@@ -20,7 +20,7 @@ logging.basicConfig(
     ],
 )
 
-BASE_URL      = "http://elitzur.ddns.net:1000"
+BASE_URL      = "https://bot.elitzurgames.com"
 HEADERS       = {"x-api-key": "a17d2A17d2"}
 GROUP_ID      = "120363425634481122@g.us"
 DEFAULT_DIR   = r"C:\navigate"

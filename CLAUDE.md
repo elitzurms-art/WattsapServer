@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `whatsapp_server.py` is a **Python FastMCP server** that wraps the remote WhatsApp bot REST API as Claude tools.
 
-- **Backend URL**: `http://elitzur.ddns.net:1000`
+- **Backend URL**: `https://bot.elitzurgames.com`
 - **Auth**: header `x-api-key: a17d2A17d2`
 - **Framework**: `fastmcp` (pip: `mcp`)
 - **HTTP client**: `httpx` (async)

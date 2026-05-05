@@ -4,7 +4,7 @@ from typing import Optional
 
 mcp = FastMCP("whatsapp")
 
-BASE_URL = "http://elitzur.ddns.net:1000"
+BASE_URL = "https://bot.elitzurgames.com"
 API_KEY = "a17d2A17d2"
 HEADERS = {"x-api-key": API_KEY}
 

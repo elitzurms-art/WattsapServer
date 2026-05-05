@@ -1,6 +1,6 @@
 # WhatsApp Bot REST API
 
-Base URL: `http://elitzur.ddns.net:1000` (local: `http://localhost:1000`)
+Base URL: `https://bot.elitzurgames.com` (local: `http://localhost:1000`)
 
 ## Authentication
 

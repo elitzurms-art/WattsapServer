@@ -4,7 +4,7 @@
 
 ## רקע
 
-יש לי בוט WhatsApp שרץ על שרת (elitzur.ddns.net:1000) עם `whatsapp-web.js` + Puppeteer + Chrome. הבוט נמצא בתיקייה עם המבנה הבא:
+יש לי בוט WhatsApp שרץ על שרת (bot.elitzurgames.com) עם `whatsapp-web.js` + Puppeteer + Chrome. הבוט נמצא בתיקייה עם המבנה הבא:
 
 ```
 bot.js              — entry point

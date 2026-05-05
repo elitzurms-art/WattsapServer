@@ -7,7 +7,7 @@
  * ===========================================
  */
 
-const BOT_API_URL = 'http://elitzur.ddns.net:1000/send';
+const BOT_API_URL = 'https://bot.elitzurgames.com/send';
 const API_KEY = 'a17d2A17d2';
 const MANAGEMENT_SHEET_NAME = 'ניהול';
 
