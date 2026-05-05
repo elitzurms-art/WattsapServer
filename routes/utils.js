@@ -46,12 +46,36 @@ function mapWwebError(err) {
     return { error: 'WhatsApp operation failed', details: raw };
 }
 
+// שגיאות שמעידות על דפדפן/דף שמת — אין דרך להתאושש בלי restart מלא של Chrome.
+// ב-bot.js יש רשימה דומה ב-unhandledRejection, אבל שגיאות שנזרקות בתוך
+// route handlers נתפסות ע"י asyncHandler ולא מגיעות לשם. בלי הזיהוי הזה
+// /state ימשיך להחזיר 500 לנצח עד שה-health-check הפנימי (כל 2 דק', רק
+// אחרי 5 דק' שקט) יחליט להרים מחדש.
+const FATAL_BROWSER_PATTERNS = [
+    'detached Frame',
+    'Target closed',
+    'Session closed',
+    'Protocol error: Connection closed',
+    'Most likely the page has been closed',
+];
+
+function isFatalBrowserError(err) {
+    const msg = err?.message || String(err);
+    return FATAL_BROWSER_PATTERNS.some(p => msg.includes(p));
+}
+
 function asyncHandler(fn) {
     return (req, res, next) => {
         Promise.resolve(fn(req, res, next)).catch(err => {
             console.error(`❌ ${req.method} ${req.originalUrl}:`, err);
             const mapped = mapWwebError(err);
-            res.status(500).json({ ok: false, ...mapped });
+            const fatal = isFatalBrowserError(err);
+            res.status(fatal ? 503 : 500).json({ ok: false, ...mapped });
+            if (fatal) {
+                console.error('💥 שגיאת דפדפן פטאלית בנתיב — יוצא לאתחול ע"י start.sh');
+                // השהייה קטנה כדי שהתשובה תישלח ללקוח לפני שהתהליך נסגר
+                setTimeout(() => process.exit(1), 100);
+            }
         });
     };
 }
